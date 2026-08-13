@@ -1,0 +1,12 @@
+# 统一换行符为 LF，避免 Windows 下 CRLF 告警
+* text=auto
+
+*.cs text eol=lf
+*.xaml text eol=lf
+*.csproj text eol=lf
+*.slnx text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+*.ico binary
