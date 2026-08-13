@@ -1,0 +1,20 @@
+<Window x:Class="DshGUI.Views.ToastWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="320"
+        SizeToContent="Height"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        ShowActivated="False">
+    <Border Background="#2B2B2B" CornerRadius="8" Padding="16,12"
+            MouseLeftButtonUp="OnClick" Cursor="Hand">
+        <StackPanel>
+            <TextBlock x:Name="TitleText" FontWeight="SemiBold" Foreground="White" FontSize="14" TextWrapping="Wrap" />
+            <TextBlock x:Name="MessageText" Foreground="#DDDDDD" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+        </StackPanel>
+    </Border>
+</Window>

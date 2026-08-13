@@ -1,0 +1,17 @@
+# Build results
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+publish/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# WebView2 runtime data (generated at run time)
+*.WebView2/
+EBWebView/
