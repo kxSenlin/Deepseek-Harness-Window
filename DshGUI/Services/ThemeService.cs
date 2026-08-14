@@ -37,12 +37,12 @@ public sealed class ThemeService
         ? System.Drawing.Color.FromArgb(0x1E, 0x1E, 0x1E)
         : System.Drawing.Color.White;
 
-    /// <summary>把当前主题的颜色字典合并进应用资源并替换上一套；所有 DynamicResource 自动刷新。</summary>
-    public void ApplyTheme()
+    /// <summary>把当前主题的颜色字典合并进应用资源并替换上一套；所有 DynamicResource 自动刷新。返回是否真的发生了切换。</summary>
+    public bool ApplyTheme()
     {
         var dark = IsDark;
         if (_appliedDark == dark && _current != null)
-            return;
+            return false;
 
         var resources = Application.Current.Resources;
         if (_current != null)
@@ -51,6 +51,31 @@ public sealed class ThemeService
         _current = new ResourceDictionary { Source = dark ? DarkSource : LightSource };
         resources.MergedDictionaries.Add(_current);
         _appliedDark = dark;
+        return true;
+    }
+
+    /// <summary>主题真正切换后触发（用于同步 WebView2 等外部对象）。</summary>
+    public event Action? ThemeChanged;
+
+    /// <summary>监听系统深浅色切换，实时跟随（仅「跟随系统」模式生效）。</summary>
+    public void StartSystemThemeWatcher()
+    {
+        SystemEvents.UserPreferenceChanged += (_, e) =>
+        {
+            if (e.Category != UserPreferenceCategory.General)
+                return;
+            Application.Current?.Dispatcher.InvokeAsync(OnSystemThemeChanged);
+        };
+    }
+
+    private void OnSystemThemeChanged()
+    {
+        if (_settings.Settings.Theme != ThemePreference.System)
+            return;
+
+        _pageDark = null;
+        if (ApplyTheme())
+            ThemeChanged?.Invoke();
     }
 
     public void ApplyToWebView(CoreWebView2? core)

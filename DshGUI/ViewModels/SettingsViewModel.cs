@@ -22,6 +22,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private int _registryIndex;
     private bool _notifyOnComplete;
     private bool _autoStart;
+    private bool _autoStartSilent;
     private bool _hotkeyEnabled;
     private int _hotkeyModifiers;
     private int _hotkeyKey;
@@ -33,6 +34,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _registryIndex = settings.Settings.NpmRegistry == MirrorRegistry ? 1 : 0;
         _notifyOnComplete = settings.Settings.NotifyOnComplete;
         _autoStart = settings.Settings.AutoStart;
+        _autoStartSilent = settings.Settings.AutoStartSilent;
         _hotkeyEnabled = settings.Settings.HotkeyEnabled;
         _hotkeyModifiers = settings.Settings.HotkeyModifiers;
         _hotkeyKey = settings.Settings.HotkeyKey;
@@ -65,6 +67,12 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref _autoStart, value);
     }
 
+    public bool AutoStartSilent
+    {
+        get => _autoStartSilent;
+        set => SetProperty(ref _autoStartSilent, value);
+    }
+
     public bool HotkeyEnabled
     {
         get => _hotkeyEnabled;
@@ -94,6 +102,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _settings.Settings.NpmRegistry = _registryIndex == 1 ? MirrorRegistry : OfficialRegistry;
         _settings.Settings.NotifyOnComplete = _notifyOnComplete;
         _settings.Settings.AutoStart = _autoStart;
+        _settings.Settings.AutoStartSilent = _autoStartSilent;
         _settings.Settings.HotkeyEnabled = _hotkeyEnabled;
         _settings.Settings.HotkeyModifiers = _hotkeyModifiers;
         _settings.Settings.HotkeyKey = _hotkeyKey;

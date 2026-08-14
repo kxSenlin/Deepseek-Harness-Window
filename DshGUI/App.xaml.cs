@@ -32,13 +32,18 @@ namespace DshGUI
 
             _theme = new ThemeService(_settings);
             _theme.ApplyTheme();
+            _theme.StartSystemThemeWatcher();
             _dsh = new DshService();
             _viewModel = new MainViewModel(_theme);
 
-            _mainWindow = new MainWindowView(_viewModel, _settings, _dsh, _theme);
-            MainWindow = _mainWindow;
-
             _tray = new TrayService();
+
+            var silent = e.Args.Contains("--autostart") && _settings.Settings.AutoStartSilent;
+            _mainWindow = new MainWindowView(_viewModel, _settings, _dsh, _theme, _tray)
+            {
+                StartSilent = silent,
+            };
+            MainWindow = _mainWindow;
             _tray.OpenRequested += () => _mainWindow.Dispatcher.Invoke(() => _viewModel.ShowMainWindow());
             _tray.CheckUpdateRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.TriggerUpdateCheck());
             _tray.ExitRequested += () => _mainWindow.Dispatcher.Invoke(() =>

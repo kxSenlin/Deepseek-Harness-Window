@@ -48,6 +48,9 @@ namespace DshGUI.Views
     setInterval(() => {
         const approval = document.querySelector('[data-approval-key]') != null;
         const running = document.querySelectorAll('[data-state=ongoing], [data-running]').length > 0 || approval;
+        if (!wasRunning && running) {
+            post({ type: 'running' });
+        }
         if (wasRunning && !running && !idleTimer) {
             idleTimer = setTimeout(() => {
                 idleTimer = null;
@@ -141,30 +144,44 @@ namespace DshGUI.Views
         private readonly SettingsService _settings;
         private readonly DshService _dsh;
         private readonly ThemeService _theme;
+        private readonly TrayService _tray;
         private readonly NotificationService _notification = new();
         private readonly UpdateService _update = new();
 
         private readonly DispatcherTimer _elapsedTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+        private readonly DispatcherTimer _healthTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+        private bool _healthChecking;
         private DateTime _elapsedStart;
         private Action? _primaryAction;
         private Action? _secondaryAction;
         private SettingsViewModel? _settingsViewModel;
         private ToastWindow? _approvalToast;
+        private ToastWindow? _disconnectToast;
 
         private IntPtr _hwnd;
         private bool _updateChecked;
+        private CoreWebView2? _wiredCore;
 
-        public MainWindow(MainViewModel viewModel, SettingsService settings, DshService dsh, ThemeService theme)
+        /// <summary>开机自启 + 静默模式：窗口不显示，只在托盘后台运行。</summary>
+        public bool StartSilent { get; set; }
+
+        public MainWindow(MainViewModel viewModel, SettingsService settings, DshService dsh, ThemeService theme, TrayService tray)
         {
             InitializeComponent();
             _viewModel = viewModel;
             _settings = settings;
             _dsh = dsh;
             _theme = theme;
+            _tray = tray;
             DataContext = viewModel;
 
             TitleIcon.Source = IconHelper.GetAppIcon(16);
             _elapsedTimer.Tick += (_, _) => UpdateElapsed();
+            _healthTimer.Tick += OnHealthTick;
+            TaskbarItemInfo = new System.Windows.Shell.TaskbarItemInfo();
+
+            _theme.ThemeChanged += () => _theme.ApplyToWebView(WebView.CoreWebView2);
+
             RestoreWindowState();
         }
 
@@ -296,29 +313,47 @@ namespace DshGUI.Views
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
+            if (StartSilent)
+            {
+                StartSilent = false;
+                Hide();
+            }
+
+            ShowLoading("正在初始化…", showLog: false);
+            if (!await EnsureWebViewReadyAsync())
+            {
+                ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。");
+                return;
+            }
+
+            await RunStartupFlowAsync();
+        }
+
+        // 初始化 / 重建 WebView2 控制器，并注入桥接脚本；可被重连流程复用。
+        private async Task<bool> EnsureWebViewReadyAsync()
+        {
             try
             {
                 WebView.DefaultBackgroundColor = _theme.WebViewBackgroundColor;
-                ShowLoading("正在初始化…", showLog: false);
                 await WebView.EnsureCoreWebView2Async();
             }
-            catch (Exception ex)
+            catch
             {
-                ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。\n\n" + ex.Message);
-                return;
+                return false;
             }
 
             _theme.ApplyToWebView(WebView.CoreWebView2);
             _viewModel.RefreshTheme();
 
             var core = WebView.CoreWebView2;
-            if (core != null)
+            if (core != null && !ReferenceEquals(core, _wiredCore))
             {
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
                 core.WebMessageReceived += OnWebMessageReceived;
+                _wiredCore = core;
             }
 
-            await RunStartupFlowAsync();
+            return true;
         }
 
         // 检测 dsh 是否已安装/已启动，并按需安装、启动。可被「重试」再次调用。
@@ -533,9 +568,24 @@ namespace DshGUI.Views
             _elapsedStart = DateTime.UtcNow;
             ElapsedText.Text = "已用 0 秒";
             _elapsedTimer.Start();
+            SetTaskbarProgressIndeterminate();
         }
 
-        private void StopElapsed() => _elapsedTimer.Stop();
+        private void StopElapsed()
+        {
+            _elapsedTimer.Stop();
+            ClearTaskbarProgress();
+        }
+
+        private void SetTaskbarProgressIndeterminate()
+        {
+            TaskbarItemInfo.ProgressState = System.Windows.Shell.TaskbarItemProgressState.Indeterminate;
+        }
+
+        private void ClearTaskbarProgress()
+        {
+            TaskbarItemInfo.ProgressState = System.Windows.Shell.TaskbarItemProgressState.None;
+        }
 
         private void UpdateElapsed()
         {
@@ -559,6 +609,7 @@ namespace DshGUI.Views
             LoadingPanel.Visibility = Visibility.Collapsed;
             WebView.Visibility = Visibility.Visible;
             WebView.CoreWebView2?.Navigate(DshService.Url + "/");
+            _healthTimer.Start();
         }
 
         private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -605,7 +656,12 @@ namespace DshGUI.Views
                 switch (type)
                 {
                     case "idle":
+                        _tray.SetRunning(false);
                         HandleAgentIdle();
+                        break;
+
+                    case "running":
+                        _tray.SetRunning(true);
                         break;
 
                     case "approval":
@@ -679,6 +735,41 @@ namespace DshGUI.Views
                 // 已关闭则忽略。
             }
             _approvalToast = null;
+        }
+
+        private async void OnHealthTick(object? sender, EventArgs e)
+        {
+            if (_healthChecking)
+                return;
+            _healthChecking = true;
+            try
+            {
+                var up = await _dsh.IsServerUpAsync();
+                if (!up && _disconnectToast == null)
+                {
+                    _disconnectToast = _notification.Show(
+                        "dsh 已断开",
+                        "点击重新连接",
+                        ReconnectDsh,
+                        persistent: true);
+                }
+            }
+            finally
+            {
+                _healthChecking = false;
+            }
+        }
+
+        private async void ReconnectDsh()
+        {
+            _disconnectToast = null;
+            _healthTimer.Stop();
+            WebView.Visibility = Visibility.Collapsed;
+            LoadingPanel.Visibility = Visibility.Visible;
+
+            // 折叠可能重建 WebView2 控制器，重新确保后再跑启动流程。
+            await EnsureWebViewReadyAsync();
+            await RunStartupFlowAsync();
         }
 
         private void ToggleVisibility()

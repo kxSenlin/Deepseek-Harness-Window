@@ -3,7 +3,7 @@ using System.Net.Http;
 
 namespace DshGUI.Services;
 
-public sealed class DshService : IDisposable
+public sealed class DshService
 {
     public const string Url = "http://127.0.0.1:3080";
 
@@ -136,8 +136,6 @@ public sealed class DshService : IDisposable
         _process?.Dispose();
         _process = null;
     }
-
-    public void Dispose() => Stop();
 
     private static string? FindOnPath(string name)
     {

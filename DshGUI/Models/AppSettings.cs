@@ -20,6 +20,9 @@ public sealed class AppSettings
     /// <summary>开机自启。</summary>
     public bool AutoStart { get; set; }
 
+    /// <summary>开机自启时静默到托盘（不弹窗口）。</summary>
+    public bool AutoStartSilent { get; set; }
+
     /// <summary>全局快捷键是否启用（默认关）。</summary>
     public bool HotkeyEnabled { get; set; }
 

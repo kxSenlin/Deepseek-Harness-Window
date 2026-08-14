@@ -7,12 +7,6 @@ public static class AutoStartService
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "DshGUI";
 
-    public static bool IsEnabled()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-        return key?.GetValue(ValueName) is string value && value.Length > 0;
-    }
-
     public static void SetEnabled(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKey);
@@ -20,7 +14,7 @@ public static class AutoStartService
         {
             var exe = Environment.ProcessPath;
             if (exe != null)
-                key.SetValue(ValueName, "\"" + exe + "\"");
+                key.SetValue(ValueName, "\"" + exe + "\" --autostart");
         }
         else
         {

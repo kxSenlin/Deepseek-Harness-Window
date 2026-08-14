@@ -31,6 +31,8 @@
                       IsChecked="{Binding NotifyOnComplete}" Margin="0,0,0,8" />
             <CheckBox Content="开机自启"
                       IsChecked="{Binding AutoStart}" Margin="0,0,0,8" />
+            <CheckBox Content="开机自启时静默到托盘（不弹窗口）"
+                      IsChecked="{Binding AutoStartSilent}" Margin="20,0,0,8" />
 
             <CheckBox Content="全局快捷键（显示/隐藏窗口）"
                       IsChecked="{Binding HotkeyEnabled}" Margin="0,0,0,8" />
