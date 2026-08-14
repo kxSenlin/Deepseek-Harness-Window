@@ -10,6 +10,9 @@
     <RootNamespace>DshGUI</RootNamespace>
     <AssemblyName>DshGUI</AssemblyName>
     <ApplicationIcon>Assets\App.ico</ApplicationIcon>
+    <Version>0.1.1</Version>
+    <FileVersion>0.1.1.0</FileVersion>
+    <AssemblyVersion>0.1.1.0</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
