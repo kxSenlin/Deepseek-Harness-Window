@@ -4,15 +4,13 @@ using DshGUI.ViewModels;
 
 namespace DshGUI.Views
 {
-    public partial class SettingsWindow : Window
+    public partial class SettingsView : System.Windows.Controls.UserControl
     {
         private bool _recording;
 
-        public SettingsWindow(SettingsViewModel viewModel)
+        public SettingsView()
         {
             InitializeComponent();
-            DataContext = viewModel;
-            viewModel.RequestClose += () => Close();
         }
 
         private void OnRecordHotkeyClick(object sender, RoutedEventArgs e)

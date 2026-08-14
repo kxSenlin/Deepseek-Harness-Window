@@ -5,14 +5,14 @@ namespace DshGUI.Services;
 
 public sealed class UpdateService
 {
-    private const string RegistryUrl = "https://registry.npmjs.org/@deepseek-ai/dsh/latest";
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    public async Task<string?> GetLatestVersionAsync()
+    public async Task<string?> GetLatestVersionAsync(string registry)
     {
         try
         {
-            var json = await Http.GetStringAsync(RegistryUrl);
+            var url = registry.TrimEnd('/') + "/@deepseek-ai/dsh/latest";
+            var json = await Http.GetStringAsync(url);
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.GetProperty("version").GetString();
         }

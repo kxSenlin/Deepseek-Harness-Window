@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Media;
 using DshGUI.Services;
 
@@ -8,18 +10,11 @@ public sealed class MainViewModel : ViewModelBase
 {
     private readonly ThemeService _theme;
 
-    private string _statusText = "正在启动 DeepSeek Harness…";
     private bool _allowRealClose;
 
     public MainViewModel(ThemeService theme)
     {
         _theme = theme;
-    }
-
-    public string StatusText
-    {
-        get => _statusText;
-        set => SetProperty(ref _statusText, value);
     }
 
     private string _windowTitle = "DeepSeek Harness";
@@ -42,6 +37,9 @@ public sealed class MainViewModel : ViewModelBase
 
     public Brush ContentBackground => _theme.ContentBackground;
 
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
     public void ShowMainWindow()
     {
         if (Application.Current.MainWindow is not { } window)
@@ -51,6 +49,11 @@ public sealed class MainViewModel : ViewModelBase
         if (window.WindowState == WindowState.Minimized)
             window.WindowState = WindowState.Normal;
         window.Activate();
+
+        // Activate() 在部分时机不可靠（比如从 toast 点击唤起），用 Win32 强制置前。
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd != IntPtr.Zero)
+            SetForegroundWindow(hwnd);
     }
 
     public void RefreshTheme()

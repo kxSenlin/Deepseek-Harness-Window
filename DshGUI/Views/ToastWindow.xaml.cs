@@ -7,9 +7,9 @@ namespace DshGUI.Views
 {
     public partial class ToastWindow : Window
     {
-        private readonly DispatcherTimer _timer;
+        private readonly DispatcherTimer? _timer;
 
-        public ToastWindow(string title, string message, Action? onClick = null)
+        public ToastWindow(string title, string message, Action? onClick = null, bool persistent = false)
         {
             InitializeComponent();
             TitleText.Text = title;
@@ -17,9 +17,12 @@ namespace DshGUI.Views
             if (onClick != null)
                 Clicked += onClick;
 
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-            _timer.Tick += (_, _) => Close();
-            _timer.Start();
+            if (!persistent)
+            {
+                _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                _timer.Tick += (_, _) => Close();
+                _timer.Start();
+            }
         }
 
         public event Action? Clicked;

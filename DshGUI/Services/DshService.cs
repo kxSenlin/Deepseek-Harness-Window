@@ -21,6 +21,10 @@ public sealed class DshService : IDisposable
 
     public static bool IsInstalled() => FindOnPath("dsh") != null;
 
+    public static bool IsNodeInstalled() => FindOnPath("node") != null;
+
+    public static bool IsNpmInstalled() => FindOnPath("npm") != null;
+
     public async Task<bool> IsServerUpAsync()
     {
         try
@@ -34,12 +38,12 @@ public sealed class DshService : IDisposable
         }
     }
 
-    public async Task<bool> InstallAsync()
+    public async Task<bool> InstallAsync(string registry, IProgress<string>? progress = null)
     {
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments = "/c npm install -g @deepseek-ai/dsh",
+            Arguments = $"/c npm install -g @deepseek-ai/dsh --registry {registry} --no-fund --no-audit --loglevel=http",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -47,8 +51,8 @@ public sealed class DshService : IDisposable
         };
 
         using var process = new Process { StartInfo = psi };
-        process.OutputDataReceived += (_, a) => AppendLog(a.Data);
-        process.ErrorDataReceived += (_, a) => AppendLog(a.Data);
+        process.OutputDataReceived += (_, a) => Report(a.Data);
+        process.ErrorDataReceived += (_, a) => Report(a.Data);
 
         try
         {
@@ -63,12 +67,21 @@ public sealed class DshService : IDisposable
         process.BeginErrorReadLine();
         await process.WaitForExitAsync();
         return process.ExitCode == 0 && IsInstalled();
+
+        void Report(string? line)
+        {
+            AppendLog(line);
+            if (line != null)
+                progress?.Report(line);
+        }
     }
 
-    public bool Start(string workspaceDirectory)
+    public bool Start(string workspaceDirectory, string registry, IProgress<string>? progress = null)
     {
         var dsh = FindOnPath("dsh");
-        var commandLine = dsh != null ? $"\"{dsh}\" web" : "npx @deepseek-ai/dsh web";
+        var commandLine = dsh != null
+            ? $"\"{dsh}\" web"
+            : $"npx --registry {registry} @deepseek-ai/dsh web";
 
         var psi = new ProcessStartInfo
         {
@@ -84,8 +97,8 @@ public sealed class DshService : IDisposable
         try
         {
             var process = new Process { StartInfo = psi };
-            process.OutputDataReceived += (_, a) => AppendLog(a.Data);
-            process.ErrorDataReceived += (_, a) => AppendLog(a.Data);
+            process.OutputDataReceived += (_, a) => Report(a.Data);
+            process.ErrorDataReceived += (_, a) => Report(a.Data);
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -96,6 +109,13 @@ public sealed class DshService : IDisposable
         {
             AppendLog("启动失败: " + ex);
             return false;
+        }
+
+        void Report(string? line)
+        {
+            AppendLog(line);
+            if (line != null)
+                progress?.Report(line);
         }
     }
 

@@ -13,9 +13,13 @@ public sealed class SettingsViewModel : ViewModelBase
     private const int ModShift = 0x0004;
     private const int ModWin = 0x0008;
 
+    public const string OfficialRegistry = "https://registry.npmjs.org";
+    public const string MirrorRegistry = "https://registry.npmmirror.com";
+
     private readonly SettingsService _settings;
 
     private int _themeIndex;
+    private int _registryIndex;
     private bool _notifyOnComplete;
     private bool _autoStart;
     private bool _hotkeyEnabled;
@@ -26,6 +30,7 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         _settings = settings;
         _themeIndex = (int)settings.Settings.Theme;
+        _registryIndex = settings.Settings.NpmRegistry == MirrorRegistry ? 1 : 0;
         _notifyOnComplete = settings.Settings.NotifyOnComplete;
         _autoStart = settings.Settings.AutoStart;
         _hotkeyEnabled = settings.Settings.HotkeyEnabled;
@@ -40,6 +45,12 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         get => _themeIndex;
         set => SetProperty(ref _themeIndex, value);
+    }
+
+    public int RegistryIndex
+    {
+        get => _registryIndex;
+        set => SetProperty(ref _registryIndex, value);
     }
 
     public bool NotifyOnComplete
@@ -80,6 +91,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private void Save()
     {
         _settings.Settings.Theme = (ThemePreference)_themeIndex;
+        _settings.Settings.NpmRegistry = _registryIndex == 1 ? MirrorRegistry : OfficialRegistry;
         _settings.Settings.NotifyOnComplete = _notifyOnComplete;
         _settings.Settings.AutoStart = _autoStart;
         _settings.Settings.HotkeyEnabled = _hotkeyEnabled;

@@ -11,6 +11,9 @@ public sealed class AppSettings
 {
     public ThemePreference Theme { get; set; } = ThemePreference.System;
 
+    /// <summary>npm 镜像源（安装 / 更新 / 检查更新共用）。</summary>
+    public string NpmRegistry { get; set; } = "https://registry.npmjs.org";
+
     /// <summary>agent 完成时弹通知（仅最小化/托盘时）。</summary>
     public bool NotifyOnComplete { get; set; } = true;
 

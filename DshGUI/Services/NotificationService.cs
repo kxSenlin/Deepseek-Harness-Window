@@ -11,9 +11,9 @@ public sealed class NotificationService
 
     private readonly List<ToastWindow> _toasts = new();
 
-    public void Show(string title, string message, Action? onClick = null)
+    public ToastWindow Show(string title, string message, Action? onClick = null, bool persistent = false)
     {
-        var toast = new ToastWindow(title, message, onClick);
+        var toast = new ToastWindow(title, message, onClick, persistent);
         _toasts.Add(toast);
         toast.Loaded += (_, _) => Reposition();
         toast.Closed += (_, _) =>
@@ -28,6 +28,7 @@ public sealed class NotificationService
         toast.Top = area.Top + area.Height;
 
         toast.Show();
+        return toast;
     }
 
     private void Reposition()

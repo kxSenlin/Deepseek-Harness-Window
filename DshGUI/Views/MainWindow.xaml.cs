@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using DshGUI.Infrastructure;
 using DshGUI.Services;
@@ -20,6 +21,11 @@ namespace DshGUI.Views
         private const int MONITOR_DEFAULTTONEAREST = 0x00000002;
         private const int HotkeyId = 0x0D5A;
 
+        // Windows 11 DWM 窗口样式：圆角 + 灰色外轮廓 + 原生阴影。
+        private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+        private const int DWMWA_BORDER_COLOR = 34;
+        private const int DWMWCP_ROUND = 2;
+
         private const string MaximizeIconData = "M 1.5,1.5 H 8.5 V 8.5 H 1.5 Z";
         private const string RestoreIconData = "M 3,1 H 9 V 7 H 3 Z M 1,3 H 7 V 9 H 1 Z";
 
@@ -32,6 +38,7 @@ namespace DshGUI.Views
     let idleTimer = null;
     let lastDark = null;
     let lastTitle = null;
+    let wasApproval = false;
 
     function currentTitle() {
         const el = document.querySelector('nav button[disabled]');
@@ -39,11 +46,13 @@ namespace DshGUI.Views
     }
 
     setInterval(() => {
-        const running = document.querySelectorAll('[data-state=ongoing], [data-running]').length > 0;
+        const approval = document.querySelector('[data-approval-key]') != null;
+        const running = document.querySelectorAll('[data-state=ongoing], [data-running]').length > 0 || approval;
         if (wasRunning && !running && !idleTimer) {
             idleTimer = setTimeout(() => {
                 idleTimer = null;
-                if (document.querySelectorAll('[data-state=ongoing], [data-running]').length === 0) {
+                if (document.querySelectorAll('[data-state=ongoing], [data-running]').length === 0
+                    && document.querySelector('[data-approval-key]') == null) {
                     post({ type: 'idle' });
                 }
             }, 800);
@@ -62,6 +71,13 @@ namespace DshGUI.Views
             lastTitle = title;
             post({ type: 'title', text: title || '' });
         }
+
+        if (approval && !wasApproval) {
+            post({ type: 'approval' });
+        } else if (!approval && wasApproval) {
+            post({ type: 'approval-resolved' });
+        }
+        wasApproval = approval;
     }, 400);
 })();";
 
@@ -112,6 +128,9 @@ namespace DshGUI.Views
         [DllImport("user32.dll")]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
         // dsh 的工作目录 = agent 的 workspace 根目录（壳不提供选择器，固定用主目录）。
         private static readonly string WorkspaceDirectory =
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -124,6 +143,13 @@ namespace DshGUI.Views
         private readonly ThemeService _theme;
         private readonly NotificationService _notification = new();
         private readonly UpdateService _update = new();
+
+        private readonly DispatcherTimer _elapsedTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+        private DateTime _elapsedStart;
+        private Action? _primaryAction;
+        private Action? _secondaryAction;
+        private SettingsViewModel? _settingsViewModel;
+        private ToastWindow? _approvalToast;
 
         private IntPtr _hwnd;
         private bool _updateChecked;
@@ -138,6 +164,7 @@ namespace DshGUI.Views
             DataContext = viewModel;
 
             TitleIcon.Source = IconHelper.GetAppIcon(16);
+            _elapsedTimer.Tick += (_, _) => UpdateElapsed();
             RestoreWindowState();
         }
 
@@ -147,8 +174,24 @@ namespace DshGUI.Views
             _hwnd = new WindowInteropHelper(this).Handle;
             HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
 
+            ApplyDwmWindowStyle();
+
             if (_settings.Settings.HotkeyEnabled)
                 RegisterHotKey(_hwnd, HotkeyId, _settings.Settings.HotkeyModifiers, _settings.Settings.HotkeyKey);
+        }
+
+        // 圆角 + 灰色外轮廓 + 原生阴影（Windows 11 起由 DWM 提供；旧系统忽略失败）。
+        private void ApplyDwmWindowStyle()
+        {
+            if (_hwnd == IntPtr.Zero)
+                return;
+
+            var corner = DWMWCP_ROUND;
+            _ = DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, Marshal.SizeOf(typeof(int)));
+
+            // COLORREF = 0x00BBGGRR；0x808080 为灰色外轮廓。
+            var borderColor = 0x00808080;
+            _ = DwmSetWindowAttribute(_hwnd, DWMWA_BORDER_COLOR, ref borderColor, Marshal.SizeOf(typeof(int)));
         }
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -256,17 +299,12 @@ namespace DshGUI.Views
             try
             {
                 WebView.DefaultBackgroundColor = _theme.WebViewBackgroundColor;
+                ShowLoading("正在初始化…", showLog: false);
                 await WebView.EnsureCoreWebView2Async();
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    "WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。\n\n" + ex.Message,
-                    "DshGUI",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-                _viewModel.AllowRealClose = true;
-                Application.Current.Shutdown();
+                ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。\n\n" + ex.Message);
                 return;
             }
 
@@ -280,40 +318,69 @@ namespace DshGUI.Views
                 core.WebMessageReceived += OnWebMessageReceived;
             }
 
+            await RunStartupFlowAsync();
+        }
+
+        // 检测 dsh 是否已安装/已启动，并按需安装、启动。可被「重试」再次调用。
+        private async Task RunStartupFlowAsync()
+        {
+            ShowLoading("正在检查 DeepSeek Harness…", showLog: false);
+
             if (await _dsh.IsServerUpAsync())
             {
                 Navigate();
                 return;
             }
 
-            if (!DshService.IsInstalled())
+            if (!DshService.IsNodeInstalled() || !DshService.IsNpmInstalled())
             {
-                var answer = MessageBox.Show(
-                    "未检测到 DeepSeek Harness（dsh）。\n是否现在自动安装？",
-                    "DshGUI",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-
-                if (answer == MessageBoxResult.No)
-                {
-                    _viewModel.StatusText = "已取消安装。请手动执行 npm install -g @deepseek-ai/dsh 后重开。";
-                    return;
-                }
-
-                _viewModel.StatusText = "正在安装 DeepSeek Harness（npm install -g @deepseek-ai/dsh）…";
-                var installed = await _dsh.InstallAsync();
-                if (!installed)
-                {
-                    _viewModel.StatusText = "安装失败。请手动执行 npm install -g @deepseek-ai/dsh。";
-                    return;
-                }
+                ShowNoNode();
+                return;
             }
 
-            _viewModel.StatusText = "正在启动 DeepSeek Harness…";
-
-            if (!_dsh.Start(WorkspaceDirectory))
+            if (!DshService.IsInstalled())
             {
-                _viewModel.StatusText = "无法启动 dsh。请确认已安装：npm install -g @deepseek-ai/dsh";
+                ShowNotInstalled();
+                return;
+            }
+
+            await StartDshAndWaitAsync();
+        }
+
+        private async void InstallDshAsync()
+        {
+            var registry = GetSelectedRegistry();
+            _settings.Settings.NpmRegistry = registry;
+            _settings.Save();
+
+            ShowLoading("正在安装 DeepSeek Harness…", showLog: true);
+            AppendLogLine($"镜像源：{registry}");
+            AppendLogLine($"npm install -g @deepseek-ai/dsh --registry {registry} --no-fund --no-audit --loglevel=http");
+
+            var progress = new Progress<string>(AppendLogLine);
+            var ok = await _dsh.InstallAsync(registry, progress);
+
+            if (ok)
+            {
+                AppendLogLine("—— 安装完成 ——");
+                await StartDshAndWaitAsync();
+            }
+            else
+            {
+                AppendLogLine("—— 安装失败 ——");
+                ShowFailed("安装失败。\n请确认网络可用，或切换到国内镜像后重试。");
+            }
+        }
+
+        private async Task StartDshAndWaitAsync()
+        {
+            ShowLoading("正在启动 DeepSeek Harness…", showLog: true, clearLog: false);
+            AppendLogLine("—— 开始启动 dsh web 服务 ——");
+            var progress = new Progress<string>(AppendLogLine);
+
+            if (!_dsh.Start(WorkspaceDirectory, _settings.Settings.NpmRegistry, progress))
+            {
+                ShowFailed("无法启动 dsh。\n请确认已安装：npm install -g @deepseek-ai/dsh");
                 return;
             }
 
@@ -335,24 +402,167 @@ namespace DshGUI.Views
 
             if (!up)
             {
-                _viewModel.StatusText = _dsh.HasExited
+                ShowFailed(_dsh.HasExited
                     ? "dsh 启动失败（可能是端口被占用或配置错误）。\n请查看日志：" + DshService.LogPath
-                    : "DeepSeek Harness 启动超时（60 秒）。\n请查看日志：" + DshService.LogPath;
+                    : "DeepSeek Harness 启动超时（60 秒）。\n请查看日志：" + DshService.LogPath);
                 return;
             }
 
             Navigate();
         }
 
+        private void ShowLoading(string message, bool showLog, bool clearLog = true)
+        {
+            StatusText.Text = message;
+            InstallProgress.Visibility = Visibility.Visible;
+            LogContainer.Visibility = showLog ? Visibility.Visible : Visibility.Collapsed;
+            if (showLog && clearLog)
+                InstallLog.Clear();
+            MirrorSelector.Visibility = Visibility.Collapsed;
+            ActionButtons.Visibility = Visibility.Collapsed;
+            SecondaryActionButton.Visibility = Visibility.Collapsed;
+            StartElapsed();
+        }
+
+        private void ShowNoNode()
+        {
+            StopElapsed();
+            StatusText.Text = "未检测到 Node.js（npm）。\ndsh 依赖 Node.js 才能安装和运行。";
+            InstallProgress.Visibility = Visibility.Collapsed;
+            LogContainer.Visibility = Visibility.Collapsed;
+            SetActions("下载 Node.js", OpenNodeDownload, "重新检测", RetryAsync);
+        }
+
+        private void ShowNotInstalled()
+        {
+            StopElapsed();
+            StatusText.Text = "未检测到 DeepSeek Harness（dsh）。\n需要安装后才能使用。";
+            InstallProgress.Visibility = Visibility.Collapsed;
+            LogContainer.Visibility = Visibility.Collapsed;
+
+            var useMirror = _settings.Settings.NpmRegistry == SettingsViewModel.MirrorRegistry;
+            MirrorOfficial.IsChecked = !useMirror;
+            MirrorNpmmirror.IsChecked = useMirror;
+            MirrorSelector.Visibility = Visibility.Visible;
+
+            SetActions("立即安装", InstallDshAsync, "取消", CancelInstall);
+        }
+
+        private void ShowFailed(string message)
+        {
+            StopElapsed();
+            StatusText.Text = message;
+            InstallProgress.Visibility = Visibility.Collapsed;
+            // 保留日志便于排查。
+            SetActions("重试", RetryAsync);
+        }
+
+        private void ShowFatal(string message)
+        {
+            StopElapsed();
+            StatusText.Text = message;
+            InstallProgress.Visibility = Visibility.Collapsed;
+            LogContainer.Visibility = Visibility.Collapsed;
+            SetActions("退出", ExitApp);
+        }
+
+        private void SetActions(string primaryText, Action primary, string? secondaryText = null, Action? secondary = null)
+        {
+            PrimaryActionButton.Content = primaryText;
+            _primaryAction = primary;
+            if (secondaryText != null && secondary != null)
+            {
+                SecondaryActionButton.Content = secondaryText;
+                _secondaryAction = secondary;
+                SecondaryActionButton.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                SecondaryActionButton.Visibility = Visibility.Collapsed;
+            }
+            ActionButtons.Visibility = Visibility.Visible;
+        }
+
+        private async void RetryAsync() => await RunStartupFlowAsync();
+
+        private string GetSelectedRegistry() =>
+            MirrorNpmmirror.IsChecked == true
+                ? SettingsViewModel.MirrorRegistry
+                : SettingsViewModel.OfficialRegistry;
+
+        private void ExitApp()
+        {
+            _viewModel.AllowRealClose = true;
+            Application.Current.Shutdown();
+        }
+
+        private void OpenNodeDownload()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://nodejs.org/",
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+                // 打开浏览器失败时忽略。
+            }
+
+            StatusText.Text = "请在浏览器中安装 Node.js（LTS）。\n安装完成后点击「重新检测」。";
+        }
+
+        private void OnPrimaryActionClick(object sender, RoutedEventArgs e) => _primaryAction?.Invoke();
+
+        private void OnSecondaryActionClick(object sender, RoutedEventArgs e) => _secondaryAction?.Invoke();
+
+        private void CancelInstall()
+        {
+            StopElapsed();
+            StatusText.Text = "已取消安装。\n可点击「重试」再次安装。";
+            InstallProgress.Visibility = Visibility.Collapsed;
+            LogContainer.Visibility = Visibility.Collapsed;
+            MirrorSelector.Visibility = Visibility.Collapsed;
+            SetActions("重试", RetryAsync);
+        }
+
+        private void StartElapsed()
+        {
+            _elapsedStart = DateTime.UtcNow;
+            ElapsedText.Text = "已用 0 秒";
+            _elapsedTimer.Start();
+        }
+
+        private void StopElapsed() => _elapsedTimer.Stop();
+
+        private void UpdateElapsed()
+        {
+            ElapsedText.Text = $"已用 {(int)(DateTime.UtcNow - _elapsedStart).TotalSeconds} 秒";
+        }
+
+        private void AppendLogLine(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+                return;
+
+            InstallLog.AppendText(line + Environment.NewLine);
+            InstallLog.CaretIndex = InstallLog.Text.Length;
+            InstallLog.ScrollToEnd();
+        }
+
         private void Navigate()
         {
             WebView.NavigationCompleted += OnNavigationCompleted;
+            StopElapsed();
+            LoadingPanel.Visibility = Visibility.Collapsed;
+            WebView.Visibility = Visibility.Visible;
             WebView.CoreWebView2?.Navigate(DshService.Url + "/");
         }
 
         private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
         {
-            StatusText.Visibility = Visibility.Collapsed;
             _ = CheckForUpdatesAsync();
         }
 
@@ -362,7 +572,7 @@ namespace DshGUI.Views
                 return;
             _updateChecked = true;
 
-            var latest = await _update.GetLatestVersionAsync();
+            var latest = await _update.GetLatestVersionAsync(_settings.Settings.NpmRegistry);
             var installed = UpdateService.GetInstalledVersion();
             if (!UpdateService.IsNewer(latest, installed))
                 return;
@@ -379,7 +589,7 @@ namespace DshGUI.Views
         private async void UpdateNow()
         {
             _notification.Show("正在更新", "正在更新 DeepSeek Harness…");
-            var ok = await _dsh.InstallAsync();
+            var ok = await _dsh.InstallAsync(_settings.Settings.NpmRegistry);
             _notification.Show(
                 ok ? "更新完成" : "更新失败",
                 ok ? "请重启应用以生效。" : "请手动执行 npm install -g @deepseek-ai/dsh");
@@ -396,6 +606,14 @@ namespace DshGUI.Views
                 {
                     case "idle":
                         HandleAgentIdle();
+                        break;
+
+                    case "approval":
+                        HandleApprovalRequested();
+                        break;
+
+                    case "approval-resolved":
+                        HandleApprovalResolved();
                         break;
 
                     case "theme" when doc.RootElement.TryGetProperty("dark", out var dark):
@@ -431,6 +649,36 @@ namespace DshGUI.Views
                     : title;
                 _notification.Show("任务已完成", message, _viewModel.ShowMainWindow);
             }
+        }
+
+        private void HandleApprovalRequested()
+        {
+            // 仅当窗口不在前台时提醒，避免打扰正在看页面的人。
+            if (WindowState == WindowState.Minimized || !IsVisible || !IsActive)
+            {
+                // 持久显示，直到用户点击或审批被处理。
+                _approvalToast = _notification.Show(
+                    "需要你的批准",
+                    "有权限请求等待处理，点击返回窗口",
+                    _viewModel.ShowMainWindow,
+                    persistent: true);
+            }
+        }
+
+        private void HandleApprovalResolved()
+        {
+            if (_approvalToast == null)
+                return;
+
+            try
+            {
+                _approvalToast.Close();
+            }
+            catch
+            {
+                // 已关闭则忽略。
+            }
+            _approvalToast = null;
         }
 
         private void ToggleVisibility()
@@ -491,21 +739,40 @@ namespace DshGUI.Views
 
         private void OnSettingsClick(object sender, RoutedEventArgs e)
         {
-            var settingsViewModel = new SettingsViewModel(_settings);
-            settingsViewModel.SettingsChanged += () =>
-            {
-                _theme.SetPageDark(null);
-                _theme.ApplyToWebView(WebView.CoreWebView2);
-                _viewModel.RefreshTheme();
-                WebView.CoreWebView2?.Reload();
-                ApplyHotkeyRegistration();
-            };
+            OpenSettings();
+        }
 
-            var dialog = new SettingsWindow(settingsViewModel)
+        private void OpenSettings()
+        {
+            CloseSettings();
+
+            _settingsViewModel = new SettingsViewModel(_settings);
+            _settingsViewModel.RequestClose += CloseSettings;
+            _settingsViewModel.SettingsChanged += OnSettingsChanged;
+            SettingsViewControl.DataContext = _settingsViewModel;
+            SettingsViewControl.Visibility = Visibility.Visible;
+        }
+
+        private void CloseSettings()
+        {
+            if (_settingsViewModel != null)
             {
-                Owner = this,
-            };
-            dialog.ShowDialog();
+                _settingsViewModel.RequestClose -= CloseSettings;
+                _settingsViewModel.SettingsChanged -= OnSettingsChanged;
+                _settingsViewModel = null;
+            }
+
+            SettingsViewControl.DataContext = null;
+            SettingsViewControl.Visibility = Visibility.Collapsed;
+        }
+
+        private void OnSettingsChanged()
+        {
+            _theme.SetPageDark(null);
+            _theme.ApplyToWebView(WebView.CoreWebView2);
+            _viewModel.RefreshTheme();
+            WebView.CoreWebView2?.Reload();
+            ApplyHotkeyRegistration();
         }
 
         private void OnClosing(object? sender, CancelEventArgs e)
