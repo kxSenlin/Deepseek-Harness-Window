@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
-using System.Windows.Media;
 using DshGUI.Services;
 
 namespace DshGUI.ViewModels;
@@ -31,12 +30,6 @@ public sealed class MainViewModel : ViewModelBase
         set => _allowRealClose = value;
     }
 
-    public Brush TitleBarBackground => _theme.TitleBarBackground;
-
-    public Brush TitleBarForeground => _theme.TitleBarForeground;
-
-    public Brush ContentBackground => _theme.ContentBackground;
-
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
@@ -56,10 +49,5 @@ public sealed class MainViewModel : ViewModelBase
             SetForegroundWindow(hwnd);
     }
 
-    public void RefreshTheme()
-    {
-        OnPropertyChanged(nameof(TitleBarBackground));
-        OnPropertyChanged(nameof(TitleBarForeground));
-        OnPropertyChanged(nameof(ContentBackground));
-    }
+    public void RefreshTheme() => _theme.ApplyTheme();
 }

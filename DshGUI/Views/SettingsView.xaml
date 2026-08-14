@@ -7,9 +7,10 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel, IsDesignTimeCreatable=False}">
     <Border Width="360"
-            Background="White"
-            BorderBrush="{StaticResource WindowOutlineBrush}"
-            BorderThickness="0,0,1,0">
+            Background="{DynamicResource AppBackgroundBrush}"
+            BorderBrush="{DynamicResource ControlBorderBrush}"
+            BorderThickness="0,0,1,0"
+            TextElement.Foreground="{DynamicResource AppForegroundBrush}">
         <StackPanel Margin="24,20">
             <TextBlock Text="设置" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,16" />
 

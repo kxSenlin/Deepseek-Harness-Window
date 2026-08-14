@@ -3,7 +3,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
-        <SolidColorBrush x:Key="TitleBarHoverBrush" Color="#22000000" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <SolidColorBrush x:Key="TitleBarHoverBrush" Color="#22000000" />
         <SolidColorBrush x:Key="TitleBarPressedBrush" Color="#33000000" />
         <SolidColorBrush x:Key="CloseHoverBrush" Color="#E81123" />
         <SolidColorBrush x:Key="ClosePressedBrush" Color="#C50F1F" />
@@ -14,7 +19,7 @@
             <Setter Property="Height" Value="40" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Foreground" Value="{Binding TitleBarForeground}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="False" />
             <Setter Property="Template">
@@ -61,5 +66,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

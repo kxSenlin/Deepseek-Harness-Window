@@ -31,6 +31,7 @@ namespace DshGUI
             _settings.Load();
 
             _theme = new ThemeService(_settings);
+            _theme.ApplyTheme();
             _dsh = new DshService();
             _viewModel = new MainViewModel(_theme);
 

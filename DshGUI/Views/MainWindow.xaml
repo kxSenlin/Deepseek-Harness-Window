@@ -14,7 +14,7 @@
         ResizeMode="CanResize"
         MinWidth="800"
         MinHeight="600"
-        Background="{Binding ContentBackground}"
+        Background="{DynamicResource AppBackgroundBrush}"
         StateChanged="OnStateChanged"
         Loaded="OnLoaded"
         Closing="OnClosing">
@@ -28,7 +28,7 @@
     </shell:WindowChrome.WindowChrome>
 
     <Border CornerRadius="8"
-            Background="{Binding ContentBackground}"
+            Background="{DynamicResource AppBackgroundBrush}"
             BorderBrush="{StaticResource WindowOutlineBrush}"
             BorderThickness="1">
         <Grid>
@@ -38,7 +38,7 @@
             </Grid.RowDefinitions>
 
             <!-- 标题栏 -->
-            <Border Grid.Row="0" Background="{Binding TitleBarBackground}" CornerRadius="8,8,0,0">
+            <Border Grid.Row="0" Background="{DynamicResource TitleBarBrush}" CornerRadius="8,8,0,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -50,7 +50,7 @@
                                RenderOptions.BitmapScalingMode="HighQuality" />
                         <TextBlock VerticalAlignment="Center"
                                    FontSize="13"
-                                   Foreground="{Binding TitleBarForeground}"
+                                   Foreground="{DynamicResource AppForegroundBrush}"
                                    Text="{Binding WindowTitle}" />
                     </StackPanel>
 
@@ -129,7 +129,7 @@
                     <wv2:WebView2 x:Name="WebView" Margin="1,0,1,1" Visibility="Collapsed" />
 
                     <!-- 启动 / 安装 / 状态面板 -->
-                    <Border x:Name="LoadingPanel" Background="{Binding ContentBackground}">
+                    <Border x:Name="LoadingPanel" Background="{DynamicResource AppBackgroundBrush}">
                         <Grid Margin="56,40">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -145,7 +145,7 @@
                                        Grid.Row="0"
                                        FontSize="20"
                                        FontWeight="SemiBold"
-                                       Foreground="{Binding TitleBarForeground}"
+                                       Foreground="{DynamicResource AppForegroundBrush}"
                                        HorizontalAlignment="Center"
                                        TextAlignment="Center"
                                        TextWrapping="Wrap" />
@@ -163,7 +163,7 @@
                                        Grid.Row="2"
                                        Margin="0,12,0,0"
                                        FontSize="13"
-                                       Foreground="#888888"
+                                       Foreground="{DynamicResource SubtleTextBrush}"
                                        HorizontalAlignment="Center" />
 
                             <Border x:Name="LogContainer"
@@ -183,7 +183,7 @@
                                              BorderThickness="0"
                                              FontFamily="Consolas"
                                              FontSize="12"
-                                             Foreground="#888888"
+                                             Foreground="{DynamicResource SubtleTextBrush}"
                                              TextWrapping="NoWrap" />
                                 </ScrollViewer>
                             </Border>
@@ -197,18 +197,18 @@
                                 <TextBlock Text="镜像源："
                                            VerticalAlignment="Center"
                                            Margin="0,0,12,0"
-                                           Foreground="{Binding TitleBarForeground}" />
+                                           Foreground="{DynamicResource AppForegroundBrush}" />
                                 <RadioButton x:Name="MirrorOfficial"
                                              GroupName="Mirror"
                                              Content="官方源"
                                              VerticalAlignment="Center"
                                              Margin="0,0,16,0"
-                                             Foreground="{Binding TitleBarForeground}" />
+                                             Foreground="{DynamicResource AppForegroundBrush}" />
                                 <RadioButton x:Name="MirrorNpmmirror"
                                              GroupName="Mirror"
                                              Content="国内镜像（npmmirror）"
                                              VerticalAlignment="Center"
-                                             Foreground="{Binding TitleBarForeground}" />
+                                             Foreground="{DynamicResource AppForegroundBrush}" />
                             </StackPanel>
 
                             <StackPanel x:Name="ActionButtons"
@@ -220,11 +220,7 @@
                                 <Button x:Name="PrimaryActionButton"
                                         MinWidth="128"
                                         Height="36"
-                                        Padding="20,0"
-                                        Background="#4D6BFE"
-                                        Foreground="White"
-                                        BorderThickness="0"
-                                        Cursor="Hand"
+                                        Style="{StaticResource PrimaryButtonStyle}"
                                         Click="OnPrimaryActionClick" />
                                 <Button x:Name="SecondaryActionButton"
                                         MinWidth="128"

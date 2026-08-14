@@ -739,7 +739,11 @@ namespace DshGUI.Views
 
         private void OnSettingsClick(object sender, RoutedEventArgs e)
         {
-            OpenSettings();
+            // 再点一次齿轮：已打开则关闭，未打开则打开。
+            if (SettingsViewControl.Visibility == Visibility.Visible)
+                CloseSettings();
+            else
+                OpenSettings();
         }
 
         private void OpenSettings()
