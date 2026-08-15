@@ -144,13 +144,6 @@ DshGUI/
         └── IconHelper.cs            从 exe 提取图标
 ```
 
-## About
-
-- DshGUI 是 DeepSeek Harness 的非官方 Windows 桌面壳，与 dsh 官方项目互相独立。
-- 插件管理是 DshGUI 的原生能力：标题栏拼图按钮或托盘菜单打开，按 Profile 查看入口文件里的插件行，支持屏蔽、解除屏蔽、卸载与本会话撤销；dsh 因插件崩溃或卡死时仍可离线盘点并修复。
-- 关键词 / Keywords：DeepSeek Harness GUI、DSH GUI、DeepSeek desktop client、DeepSeek 桌面客户端、Windows WPF WebView2、dsh 插件管理。
-- DeepSeek 及相关商标归其权利人所有。
-
 ## 说明与已知边界
 
 - WPF 自身配置存 `%LOCALAPPDATA%\DshGUI\settings.json`，与 dsh 的 `~/.dsh` 隔离。
