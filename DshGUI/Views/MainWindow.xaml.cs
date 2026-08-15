@@ -29,8 +29,6 @@ namespace DshGUI.Views
         private const string MaximizeIconData = "M 1.5,1.5 H 8.5 V 8.5 H 1.5 Z";
         private const string RestoreIconData = "M 3,1 H 9 V 7 H 3 Z M 1,3 H 7 V 9 H 1 Z";
 
-        private static readonly Brush PinActiveBrush = new SolidColorBrush(Color.FromRgb(0x4D, 0x6B, 0xFE));
-
         // 注入到 dsh 页面：监听「运行中→空闲」「深色主题」「当前会话标题」三个状态。
         private const string BridgeScript = @"(function () {
     const post = (m) => window.chrome.webview.postMessage(m);
@@ -155,11 +153,14 @@ namespace DshGUI.Views
         private Action? _primaryAction;
         private Action? _secondaryAction;
         private SettingsViewModel? _settingsViewModel;
+        private PluginManagerService? _pluginManager;
+        private PluginManagerWindow? _pluginWindow;
         private ToastWindow? _approvalToast;
         private ToastWindow? _disconnectToast;
 
         private IntPtr _hwnd;
         private bool _updateChecked;
+        private bool _manualUpdateCheck;
         private CoreWebView2? _wiredCore;
 
         /// <summary>开机自启 + 静默模式：窗口不显示，只在托盘后台运行。</summary>
@@ -608,7 +609,7 @@ namespace DshGUI.Views
             StopElapsed();
             LoadingPanel.Visibility = Visibility.Collapsed;
             WebView.Visibility = Visibility.Visible;
-            WebView.CoreWebView2?.Navigate(DshService.Url + "/");
+            WebView.CoreWebView2?.Navigate(_dsh.Url + "/");
             _healthTimer.Start();
         }
 
@@ -622,11 +623,25 @@ namespace DshGUI.Views
             if (_updateChecked)
                 return;
             _updateChecked = true;
+            var manual = _manualUpdateCheck;
+            _manualUpdateCheck = false;
 
             var latest = await _update.GetLatestVersionAsync(_settings.Settings.NpmRegistry);
             var installed = UpdateService.GetInstalledVersion();
             if (!UpdateService.IsNewer(latest, installed))
+            {
+                if (manual)
+                {
+                    var current = string.IsNullOrEmpty(installed) ? "未知" : installed;
+                    _notification.Show(
+                        latest == null ? "检查更新失败" : "已是最新版本",
+                        latest == null
+                            ? "无法连接 npm registry，请稍后重试。"
+                            : $"DeepSeek Harness 已是最新版本（{current}）");
+                }
+
                 return;
+            }
 
             _notification.Show("更新可用", $"DeepSeek Harness {latest}（当前 {installed}）", UpdateNow);
         }
@@ -634,6 +649,7 @@ namespace DshGUI.Views
         public void TriggerUpdateCheck()
         {
             _updateChecked = false;
+            _manualUpdateCheck = true;
             _ = CheckForUpdatesAsync();
         }
 
@@ -811,15 +827,7 @@ namespace DshGUI.Views
         private void OnPinClick(object sender, RoutedEventArgs e)
         {
             Topmost = !Topmost;
-            UpdatePinIcon();
-        }
-
-        private void UpdatePinIcon()
-        {
-            if (Topmost)
-                PinIcon.Fill = PinActiveBrush;
-            else
-                PinIcon.ClearValue(System.Windows.Shapes.Shape.FillProperty);
+            _viewModel.IsTopmost = Topmost;
         }
 
         private void OnCloseClick(object sender, RoutedEventArgs e)
@@ -837,11 +845,68 @@ namespace DshGUI.Views
                 OpenSettings();
         }
 
+        private void OnPluginManagerClick(object sender, RoutedEventArgs e) => OpenPluginManager();
+
+        /// <summary>打开插件操作台；dsh 崩溃/卡死时也可用。</summary>
+        public void OpenPluginManager()
+        {
+            try
+            {
+                if (_pluginWindow is { IsLoaded: true })
+                {
+                    _pluginWindow.Show();
+                    _pluginWindow.Activate();
+                    return;
+                }
+
+                _pluginManager ??= new PluginManagerService(_dsh, RestartManagedDshAsync);
+                _pluginWindow = new PluginManagerWindow(_pluginManager, _dsh, RestartManagedDshAsync, this, _theme);
+                _pluginWindow.Closed += (_, _) => _pluginWindow = null;
+                _pluginWindow.Show();
+            }
+            catch (Exception ex)
+            {
+                var errorPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "DshGUI", "plugin-manager-error.log");
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(errorPath)!);
+                    File.WriteAllText(errorPath, DateTime.Now + Environment.NewLine + ex);
+                }
+                catch
+                {
+                    // 写诊断文件失败时忽略。
+                }
+
+                System.Windows.MessageBox.Show(this, "插件管理窗口打开失败：\n" + ex.Message, "DshGUI",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>供插件操作台在屏蔽/卸载/撤销后重启 dsh。</summary>
+        public Task RestartManagedDshAsync() => RunStartupFlowAsync();
+
         private void OpenSettings()
         {
             CloseSettings();
 
-            _settingsViewModel = new SettingsViewModel(_settings);
+            _settingsViewModel = new SettingsViewModel(_settings)
+            {
+                NoticeCallback = (title, message) =>
+                {
+                    System.Windows.MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return true;
+                },
+                PortOccupiedCallback = port =>
+                    System.Windows.MessageBox.Show(
+                        this,
+                        $"端口 {port} 已被占用。\n\n若继续保存，DshGUI 会连接该端口上的现有服务，"
+                        + "不再自行启动新的 dsh 实例。\n\n仍要保存吗？",
+                        "端口已被占用",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning) == MessageBoxResult.Yes,
+            };
             _settingsViewModel.RequestClose += CloseSettings;
             _settingsViewModel.SettingsChanged += OnSettingsChanged;
             SettingsViewControl.DataContext = _settingsViewModel;
@@ -861,13 +926,27 @@ namespace DshGUI.Views
             SettingsViewControl.Visibility = Visibility.Collapsed;
         }
 
-        private void OnSettingsChanged()
+        private async void OnSettingsChanged()
         {
             _theme.SetPageDark(null);
             _theme.ApplyToWebView(WebView.CoreWebView2);
             _viewModel.RefreshTheme();
-            WebView.CoreWebView2?.Reload();
             ApplyHotkeyRegistration();
+
+            var portChanged = _settings.Settings.DshPort != _dsh.Port;
+            if (!portChanged)
+            {
+                WebView.CoreWebView2?.Reload();
+                return;
+            }
+
+            // 端口变更：更新 DshService，停止旧端口上的 dsh，并按新端口重启连接流程。
+            _dsh.SetPort(_settings.Settings.DshPort);
+            _dsh.Stop();
+            WebView.Visibility = Visibility.Collapsed;
+            LoadingPanel.Visibility = Visibility.Visible;
+            await EnsureWebViewReadyAsync();
+            await RunStartupFlowAsync();
         }
 
         private void OnClosing(object? sender, CancelEventArgs e)
@@ -877,6 +956,8 @@ namespace DshGUI.Views
                 SaveWindowState();
                 if (_hwnd != IntPtr.Zero)
                     UnregisterHotKey(_hwnd, HotkeyId);
+                _pluginManager?.Dispose();
+                _pluginManager = null;
                 return;
             }
 

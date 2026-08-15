@@ -20,6 +20,16 @@
                 <ComboBoxItem Content="国内镜像（registry.npmmirror.com）" />
             </ComboBox>
 
+            <TextBlock Text="dsh 端口（DshGUI 监听/拉起 dsh 使用）" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <StackPanel Margin="0,0,0,16">
+                <TextBox Width="200" Height="30" HorizontalAlignment="Left" VerticalContentAlignment="Center"
+                         Text="{Binding DshPortText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text="默认 3080。1-1023 系统保留端口及 RDP/数据库等常用服务端口不可用；端口已被占用时保存会提醒。"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleTextBrush}" />
+            </StackPanel>
+
             <TextBlock Text="主题" FontWeight="SemiBold" Margin="0,0,0,8" />
             <ComboBox SelectedIndex="{Binding ThemeIndex, Mode=TwoWay}" Margin="0,0,0,16">
                 <ComboBoxItem Content="跟随系统" />

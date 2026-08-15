@@ -30,6 +30,15 @@ public sealed class MainViewModel : ViewModelBase
         set => _allowRealClose = value;
     }
 
+    private bool _isTopmost;
+
+    /// <summary>窗口置顶状态（标题栏图钉由 XAML 触发器按此状态换色）。</summary>
+    public bool IsTopmost
+    {
+        get => _isTopmost;
+        set => SetProperty(ref _isTopmost, value);
+    }
+
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 

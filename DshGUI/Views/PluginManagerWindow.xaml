@@ -1,0 +1,272 @@
+<Window x:Class="DshGUI.Views.PluginManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:DshGUI.ViewModels"
+        xmlns:models="clr-namespace:DshGUI.Models"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:PluginManagerViewModel, IsDesignTimeCreatable=False}"
+        Title="插件管理"
+        Width="1100"
+        Height="780"
+        MinWidth="900"
+        MinHeight="640"
+        ResizeMode="CanResize"
+        SizeToContent="Manual"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppBackgroundBrush}"
+        TextElement.Foreground="{DynamicResource AppForegroundBrush}"
+        Loaded="OnLoaded"
+        Closed="OnClosed">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="200" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="160" MinHeight="80" MaxHeight="500" />
+        </Grid.RowDefinitions>
+
+        <!-- 工具栏 -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Profile：" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1"
+                      Width="150"
+                      Margin="8,0,0,0"
+                      ItemsSource="{Binding Profiles}"
+                      SelectedItem="{Binding SelectedProfile}" />
+            <Button Grid.Column="2"
+                    Content="刷新"
+                    Margin="10,0,0,0"
+                    Command="{Binding RefreshCommand}" />
+            <TextBox Grid.Column="3"
+                     Margin="14,0,0,0"
+                     VerticalContentAlignment="Center"
+                     ToolTip="按 id / name / 来源过滤"
+                     Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Grid.Column="4"
+                       Text="加载中…"
+                       Margin="10,0,0,0"
+                       VerticalAlignment="Center"
+                       Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
+            <Button Grid.Column="5"
+                    Content="重启 dsh"
+                    Margin="10,0,0,0"
+                    Command="{Binding RestartDshCommand}" />
+        </Grid>
+
+        <TextBlock Grid.Row="1"
+                   Text="{Binding Status}"
+                   TextWrapping="Wrap"
+                   Margin="0,10,0,0"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource AppForegroundBrush}" />
+
+        <!-- 主体 -->
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="340" />
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0" Margin="0,0,12,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="插件行（选择后执行屏蔽 / 解除 / 卸载）"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="屏蔽选中"
+                                Command="{Binding BlockCommand}" />
+                        <Button Content="解除屏蔽"
+                                Margin="8,0,0,0"
+                                Command="{Binding UnblockCommand}" />
+                        <Button Content="卸载选中"
+                                Margin="8,0,0,0"
+                                Command="{Binding UninstallRowCommand}" />
+                    </StackPanel>
+                </Grid>
+
+                <DataGrid Grid.Row="1"
+                          Margin="0,8,0,0"
+                          ItemsSource="{Binding Rows}"
+                          SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow"
+                          Background="{DynamicResource SurfaceBrush}"
+                          Foreground="{DynamicResource AppForegroundBrush}"
+                          BorderBrush="{DynamicResource ControlBorderBrush}"
+                          BorderThickness="1"
+                          RowBackground="{DynamicResource SurfaceBrush}"
+                          AlternatingRowBackground="{DynamicResource SurfaceHoverBrush}"
+                          HorizontalGridLinesBrush="{DynamicResource ControlBorderBrush}"
+                          VerticalGridLinesBrush="Transparent">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="状态"
+                                            Width="64"
+                                            Binding="{Binding StatusDisplay}" />
+                        <DataGridTextColumn Header="id"
+                                            Width="150"
+                                            Binding="{Binding Id}" />
+                        <DataGridTextColumn Header="name"
+                                            Width="230"
+                                            Binding="{Binding Name}" />
+                        <DataGridTextColumn Header="来源"
+                                            Width="220"
+                                            Binding="{Binding SourceDisplay}" />
+                        <DataGridTextColumn Header="实体"
+                                            Width="260"
+                                            Binding="{Binding EntityDisplay}" />
+                        <DataGridTextColumn Header="包"
+                                            Width="170"
+                                            Binding="{Binding PackageDisplay}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="150" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="150" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="已安装依赖（package.json dependencies）"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="卸载选中包" Command="{Binding UninstallPackageCommand}" />
+                    </Grid>
+                    <TextBlock Margin="0,4,0,0"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource SubtleTextBrush}"
+                               Text="这里是通过 dsh plugin add 写入 package.json 的包；bundle 包会生成左侧插件行，没有 patch 的普通依赖只在这里卸载。" />
+                </StackPanel>
+
+                <DataGrid Grid.Row="1"
+                          Margin="0,8,0,0"
+                          ItemsSource="{Binding Packages}"
+                          SelectedItem="{Binding SelectedPackage, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow"
+                          Background="{DynamicResource SurfaceBrush}"
+                          Foreground="{DynamicResource AppForegroundBrush}"
+                          BorderBrush="{DynamicResource ControlBorderBrush}"
+                          BorderThickness="1"
+                          RowBackground="{DynamicResource SurfaceBrush}"
+                          HorizontalGridLinesBrush="{DynamicResource ControlBorderBrush}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="包名" Width="150" Binding="{Binding Name}" />
+                        <DataGridTextColumn Header="来源" Width="*" Binding="{Binding Spec}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <Grid Grid.Row="2" Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="本会话卸载记录（可撤销）"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="撤销选中" Command="{Binding UndoCommand}" />
+                </Grid>
+
+                <DataGrid Grid.Row="3"
+                          Margin="0,8,0,0"
+                          ItemsSource="{Binding UndoRecords}"
+                          SelectedItem="{Binding SelectedUndoRecord, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow"
+                          Background="{DynamicResource SurfaceBrush}"
+                          Foreground="{DynamicResource AppForegroundBrush}"
+                          BorderBrush="{DynamicResource ControlBorderBrush}"
+                          BorderThickness="1"
+                          RowBackground="{DynamicResource SurfaceBrush}"
+                          HorizontalGridLinesBrush="{DynamicResource ControlBorderBrush}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="记录" Width="*" Binding="{Binding Display}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Grid.Row="4"
+                           Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleTextBrush}"
+                           Text="提示：本操作台只管理入口文件里的插件行。dsh 页面插件清单会多出 include 根、agent preset 子行和自动注入的动态行，这些只在进程内存中，重启后消失；内置行建议只屏蔽，卸载仅针对 profile 依赖与手工行。" />
+            </Grid>
+        </Grid>
+
+        <!-- 分隔条：拖动可调整上方列表与下方日志的高度 -->
+        <GridSplitter Grid.Row="3"
+                      Height="8"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      Background="Transparent"
+                      Cursor="SizeNS" />
+
+        <!-- 日志 -->
+        <Border Grid.Row="4"
+                Margin="0,10,0,0"
+                Background="#11000000"
+                BorderBrush="#22000000"
+                BorderThickness="1"
+                CornerRadius="6">
+            <TextBox Text="{Binding Log, Mode=OneWay}"
+                     IsReadOnly="True"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     FontFamily="Consolas"
+                     FontSize="12"
+                     Foreground="{DynamicResource SubtleTextBrush}"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"
+                     TextWrapping="NoWrap" />
+        </Border>
+    </Grid>
+</Window>

@@ -30,10 +30,17 @@ namespace DshGUI
             _settings = new SettingsService();
             _settings.Load();
 
+            // 旧配置或手改 settings.json 可能保存了不安全的端口；启动时回退到 3080。
+            if (DshService.GetPortError(_settings.Settings.DshPort) != null)
+            {
+                _settings.Settings.DshPort = 3080;
+                _settings.Save();
+            }
+
             _theme = new ThemeService(_settings);
             _theme.ApplyTheme();
             _theme.StartSystemThemeWatcher();
-            _dsh = new DshService();
+            _dsh = new DshService(_settings.Settings.DshPort);
             _viewModel = new MainViewModel(_theme);
 
             _tray = new TrayService();
@@ -45,6 +52,7 @@ namespace DshGUI
             };
             MainWindow = _mainWindow;
             _tray.OpenRequested += () => _mainWindow.Dispatcher.Invoke(() => _viewModel.ShowMainWindow());
+            _tray.PluginManagerRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.OpenPluginManager());
             _tray.CheckUpdateRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.TriggerUpdateCheck());
             _tray.ExitRequested += () => _mainWindow.Dispatcher.Invoke(() =>
             {

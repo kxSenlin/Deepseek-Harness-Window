@@ -14,6 +14,9 @@ public sealed class AppSettings
     /// <summary>npm 镜像源（安装 / 更新 / 检查更新共用）。</summary>
     public string NpmRegistry { get; set; } = "https://registry.npmjs.org";
 
+    /// <summary>dsh 监听端口，DshGUI 通过该端口连接并拉起 dsh。</summary>
+    public int DshPort { get; set; } = 3080;
+
     /// <summary>agent 完成时弹通知（仅最小化/托盘时）。</summary>
     public bool NotifyOnComplete { get; set; } = true;
 

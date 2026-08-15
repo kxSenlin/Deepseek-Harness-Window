@@ -20,6 +20,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private int _themeIndex;
     private int _registryIndex;
+    private string _dshPortText;
     private bool _notifyOnComplete;
     private bool _autoStart;
     private bool _autoStartSilent;
@@ -32,6 +33,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _settings = settings;
         _themeIndex = (int)settings.Settings.Theme;
         _registryIndex = settings.Settings.NpmRegistry == MirrorRegistry ? 1 : 0;
+        _dshPortText = settings.Settings.DshPort.ToString();
         _notifyOnComplete = settings.Settings.NotifyOnComplete;
         _autoStart = settings.Settings.AutoStart;
         _autoStartSilent = settings.Settings.AutoStartSilent;
@@ -39,9 +41,15 @@ public sealed class SettingsViewModel : ViewModelBase
         _hotkeyModifiers = settings.Settings.HotkeyModifiers;
         _hotkeyKey = settings.Settings.HotkeyKey;
 
-        SaveCommand = new RelayCommand(_ => Save());
+        SaveCommand = new RelayCommand(_ => SaveAsync());
         CancelCommand = new RelayCommand(_ => RequestClose?.Invoke());
     }
+
+    /// <summary>UI 注入：普通提示框。</summary>
+    public Func<string, string, bool>? NoticeCallback { get; set; }
+
+    /// <summary>UI 注入：保存时端口已被占用，返回 true 表示仍要保存。</summary>
+    public Func<int, bool>? PortOccupiedCallback { get; set; }
 
     public int ThemeIndex
     {
@@ -53,6 +61,12 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         get => _registryIndex;
         set => SetProperty(ref _registryIndex, value);
+    }
+
+    public string DshPortText
+    {
+        get => _dshPortText;
+        set => SetProperty(ref _dshPortText, value);
     }
 
     public bool NotifyOnComplete
@@ -96,10 +110,33 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(HotkeyDisplay));
     }
 
-    private void Save()
+    private async void SaveAsync()
     {
+        if (!int.TryParse(_dshPortText.Trim(), out var port))
+        {
+            NoticeCallback?.Invoke("端口无效", "dsh 端口必须是 1-65535 之间的数字。");
+            return;
+        }
+
+        var portError = DshService.GetPortError(port);
+        if (portError != null)
+        {
+            NoticeCallback?.Invoke("端口不安全", portError);
+            return;
+        }
+
+        // 只有端口发生变化且已被占用时才提醒，避免每次保存当前端口都弹窗。
+        if (port != _settings.Settings.DshPort
+            && await DshService.IsPortListeningOnPortAsync(port))
+        {
+            var confirmed = PortOccupiedCallback?.Invoke(port) ?? false;
+            if (!confirmed)
+                return;
+        }
+
         _settings.Settings.Theme = (ThemePreference)_themeIndex;
         _settings.Settings.NpmRegistry = _registryIndex == 1 ? MirrorRegistry : OfficialRegistry;
+        _settings.Settings.DshPort = port;
         _settings.Settings.NotifyOnComplete = _notifyOnComplete;
         _settings.Settings.AutoStart = _autoStart;
         _settings.Settings.AutoStartSilent = _autoStartSilent;
@@ -107,6 +144,9 @@ public sealed class SettingsViewModel : ViewModelBase
         _settings.Settings.HotkeyModifiers = _hotkeyModifiers;
         _settings.Settings.HotkeyKey = _hotkeyKey;
         _settings.Save();
+
+        _dshPortText = port.ToString();
+        OnPropertyChanged(nameof(DshPortText));
 
         AutoStartService.SetEnabled(_autoStart);
 

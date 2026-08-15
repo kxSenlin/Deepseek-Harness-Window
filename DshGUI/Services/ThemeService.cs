@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using DshGUI.Models;
@@ -90,6 +92,27 @@ public sealed class ThemeService
             _ => CoreWebView2PreferredColorScheme.Auto,
         };
     }
+
+    /// <summary>把系统标题栏（插件管理/确认弹窗）同步为当前深色/浅色。</summary>
+    public void ApplyWindowTitleBar(Window window)
+    {
+        void Apply()
+        {
+            var hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero)
+                return;
+            var enabled = IsDark ? 1 : 0;
+            // Windows 11/10 20H1 使用属性 20；旧版 10 使用属性 19。
+            _ = DwmSetWindowAttribute(hwnd, 20, ref enabled, Marshal.SizeOf(typeof(int)));
+            _ = DwmSetWindowAttribute(hwnd, 19, ref enabled, Marshal.SizeOf(typeof(int)));
+        }
+
+        window.SourceInitialized += (_, _) => Apply();
+        Apply();
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     public static bool SystemUsesDarkTheme()
     {
