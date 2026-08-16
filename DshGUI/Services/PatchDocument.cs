@@ -203,6 +203,98 @@ public sealed partial class PatchDocument
         return true;
     }
 
+    /// <summary>添加一个手工 insert 行；同 id 已存在时不做任何事。</summary>
+    public void AddInsertedRow(string id, string name, bool? disabled)
+    {
+        if (FindTopLevelOverride(id) != null || FindInsertedRow(id) != null)
+            return;
+
+        var first = "- insert:";
+        var rest = new List<string>
+        {
+            $"    - id: {YamlScalar(id)}",
+            $"      name: {YamlScalar(name)}",
+        };
+        if (disabled != null)
+            rest.Add("      disabled: " + BoolLiteral(disabled.Value));
+
+        if (TryReplaceEmptyArrayWithFirstEntry(first))
+        {
+            _lines.InsertRange(1, rest);
+        }
+        else
+        {
+            if (_lines.Count > 0 && _lines[^1] != "")
+                _lines.Add("");
+            _lines.Add(first);
+            _lines.AddRange(rest);
+        }
+
+        Rebuild();
+    }
+
+    /// <summary>
+    /// 把 source 里当前文档缺失且属于 allowedNames 的行合并进来；
+    /// allowedNames 为 null 时合并全部缺失行。已存在的 id 一律不替换。
+    /// </summary>
+    public void MergeMissingFrom(PatchDocument source, IReadOnlyCollection<string>? allowedNames = null)
+    {
+        bool Allowed(string id, string name) =>
+            allowedNames == null
+            || (id.Length > 0 && allowedNames.Contains(id))
+            || (name.Length > 0 && allowedNames.Contains(name));
+
+        foreach (var entry in source.TopLevelEntries)
+        {
+            if (entry.IsInsertList)
+            {
+                foreach (var row in entry.InsertedRows)
+                {
+                    if (string.IsNullOrWhiteSpace(row.Id) || !Allowed(row.Id!, row.Name ?? ""))
+                        continue;
+                    AddInsertedRow(row.Id!, row.Name ?? "", row.Disabled);
+                }
+
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.Id) || !Allowed(entry.Id!, entry.Name ?? ""))
+                continue;
+            if (FindTopLevelOverride(entry.Id!) != null || FindInsertedRow(entry.Id!) != null)
+                continue;
+            AppendRawEntry(source.GetRawEntry(entry));
+        }
+    }
+
+    /// <summary>复制源文档某条目的原始行块。</summary>
+    public string GetRawEntry(PatchEntry entry)
+    {
+        return string.Join("\n", _lines
+            .Skip(entry.DashLineIndex)
+            .Take(entry.EndLineIndexExclusive - entry.DashLineIndex)
+            .SkipWhile(string.IsNullOrWhiteSpace));
+    }
+
+    private void AppendRawEntry(string raw)
+    {
+        var lines = raw.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').ToList();
+        if (lines.Count == 0)
+            return;
+
+        if (TryReplaceEmptyArrayWithFirstEntry(lines[0]))
+        {
+            _lines.InsertRange(1, lines.Skip(1));
+        }
+        else
+        {
+            if (_lines.Count > 0 && _lines[^1] != "")
+                _lines.Add("");
+            _lines.AddRange(lines);
+        }
+
+        Rebuild();
+    }
+
     /// <summary>添加或更新顶层 id 覆盖（用于屏蔽 bundle 插入的行）。</summary>
     public PatchEntry AddOrUpdateTopLevelOverride(string id, bool? disabled)
     {

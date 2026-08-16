@@ -30,6 +30,19 @@
                            Foreground="{DynamicResource SubtleTextBrush}" />
             </StackPanel>
 
+            <TextBlock Text="dsh 进程" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <StackPanel Margin="0,0,0,16">
+                <Button Content="关闭 DeepSeek Harness"
+                        Width="200"
+                        HorizontalAlignment="Left"
+                        Style="{StaticResource DangerButtonStyle}"
+                        Command="{Binding StopDshCommand}" />
+                <TextBlock Text="{Binding StopDshStatus}"
+                           Margin="0,8,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleTextBrush}" />
+            </StackPanel>
+
             <TextBlock Text="主题" FontWeight="SemiBold" Margin="0,0,0,8" />
             <ComboBox SelectedIndex="{Binding ThemeIndex, Mode=TwoWay}" Margin="0,0,0,16">
                 <ComboBoxItem Content="跟随系统" />

@@ -37,6 +37,8 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
@@ -51,17 +53,25 @@
                     Content="刷新"
                     Margin="10,0,0,0"
                     Command="{Binding RefreshCommand}" />
-            <TextBox Grid.Column="3"
+            <Button Grid.Column="3"
+                    Content="导出插件包"
+                    Margin="10,0,0,0"
+                    Command="{Binding ExportPackageCommand}" />
+            <Button Grid.Column="4"
+                    Content="导入插件包"
+                    Margin="10,0,0,0"
+                    Command="{Binding ImportPackageCommand}" />
+            <TextBox Grid.Column="5"
                      Margin="14,0,0,0"
                      VerticalContentAlignment="Center"
                      ToolTip="按 id / name / 来源过滤"
                      Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" />
-            <TextBlock Grid.Column="4"
+            <TextBlock Grid.Column="6"
                        Text="加载中…"
                        Margin="10,0,0,0"
                        VerticalAlignment="Center"
                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
-            <Button Grid.Column="5"
+            <Button Grid.Column="7"
                     Content="重启 dsh"
                     Margin="10,0,0,0"
                     Command="{Binding RestartDshCommand}" />

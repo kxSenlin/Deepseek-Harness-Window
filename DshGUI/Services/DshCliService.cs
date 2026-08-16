@@ -126,6 +126,9 @@ public static class DshCliService
     public static Task<DshCliResult> RemovePluginAsync(string profile, string packageName, IProgress<string>? progress = null) =>
         RunAsync(["plugin", "--profile", profile, "remove", packageName], 300_000, progress);
 
+    public static Task<DshCliResult> InstallProfileAsync(string profile, IProgress<string>? progress = null) =>
+        RunAsync(["plugin", "--profile", profile, "install"], 300_000, progress);
+
     private static bool IsSafeArgument(string argument)
     {
         if (string.IsNullOrWhiteSpace(argument))

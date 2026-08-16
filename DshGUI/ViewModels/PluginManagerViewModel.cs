@@ -9,6 +9,7 @@ namespace DshGUI.ViewModels;
 public sealed class PluginManagerViewModel : ViewModelBase
 {
     private readonly PluginManagerService _service;
+    private readonly PluginPackageService _packageService;
     private readonly DshService _dsh;
     private readonly Func<Task> _restartDsh;
     private readonly HashSet<string> _inventoriedProfiles = new(StringComparer.Ordinal);
@@ -23,9 +24,13 @@ public sealed class PluginManagerViewModel : ViewModelBase
     private bool _isBusy;
 
     public PluginManagerViewModel(
-        PluginManagerService service, DshService dsh, Func<Task> restartDsh)
+        PluginManagerService service,
+        PluginPackageService packageService,
+        DshService dsh,
+        Func<Task> restartDsh)
     {
         _service = service;
+        _packageService = packageService;
         _dsh = dsh;
         _restartDsh = restartDsh;
 
@@ -36,6 +41,8 @@ public sealed class PluginManagerViewModel : ViewModelBase
         UninstallPackageCommand = new RelayCommand(_ => _ = UninstallSelectedPackageAsync(), _ => SelectedPackage != null);
         UndoCommand = new RelayCommand(_ => _ = UndoSelectedAsync(), _ => SelectedUndoRecord != null);
         RestartDshCommand = new RelayCommand(_ => _ = RestartDshAsync());
+        ExportPackageCommand = new RelayCommand(_ => _ = ExportPackageAsync());
+        ImportPackageCommand = new RelayCommand(_ => _ = ImportPackageAsync());
     }
 
     public ObservableCollection<PluginProfileOption> Profiles { get; } = [];
@@ -60,6 +67,10 @@ public sealed class PluginManagerViewModel : ViewModelBase
 
     public ICommand RestartDshCommand { get; }
 
+    public ICommand ExportPackageCommand { get; }
+
+    public ICommand ImportPackageCommand { get; }
+
     /// <summary>UI 注入：弹确认框（可要求输入插件名做严格确认）。</summary>
     public Func<PluginConfirmPrompt, bool>? ConfirmCallback { get; set; }
 
@@ -68,6 +79,15 @@ public sealed class PluginManagerViewModel : ViewModelBase
 
     /// <summary>UI 注入：弹出带红色“停止 DeepSeek Harness”按钮的对话框；返回 true 表示用户点击了红色按钮。</summary>
     public Func<string, bool>? StopDshRequestedCallback { get; set; }
+
+    /// <summary>UI 注入：选择 .dshpkg 保存路径；返回 null 表示取消。</summary>
+    public Func<string?>? ExportPackagePathCallback { get; set; }
+
+    /// <summary>UI 注入：选择 .dshpkg 文件；返回 null 表示取消。</summary>
+    public Func<string?>? ImportPackagePathCallback { get; set; }
+
+    /// <summary>UI 注入：显示导入预览并返回用户勾选的插件名；返回 null 表示取消。</summary>
+    public Func<PluginImportPreview, IReadOnlyList<string>?>? ImportPreviewCallback { get; set; }
 
     public PluginProfileOption? SelectedProfile
     {
@@ -351,6 +371,12 @@ public sealed class PluginManagerViewModel : ViewModelBase
         if (row.UninstallKind == PluginUninstallKind.FileOrLinkDependency && !deleteExternal)
             return;
 
+        if (await _dsh.IsRunningAsync()
+            && !await EnsureDshStoppedForOperationAsync("卸载插件"))
+        {
+            return;
+        }
+
         await RunOperationAsync($"卸载 {matchText}", _service.UninstallRowAsync(
             SelectedProfile.Name, row.Id, deleteExternal, new Progress<string>(AppendLog)));
     }
@@ -378,6 +404,12 @@ public sealed class PluginManagerViewModel : ViewModelBase
                 package.EntityPath.Length > 0 ? package.EntityPath : "实体未找到");
         if (package.IsFileOrLink && !deleteExternal)
             return;
+
+        if (await _dsh.IsRunningAsync()
+            && !await EnsureDshStoppedForOperationAsync("卸载依赖包"))
+        {
+            return;
+        }
 
         await RunOperationAsync($"卸载 {package.Name}", _service.UninstallPackageAsync(
             SelectedProfile.Name, package.Name, deleteExternal, new Progress<string>(AppendLog)));
@@ -441,6 +473,12 @@ public sealed class PluginManagerViewModel : ViewModelBase
                     return;
             }
 
+            if (await _dsh.IsRunningAsync()
+                && !await EnsureDshStoppedForOperationAsync("撤销卸载"))
+            {
+                return;
+            }
+
             await RunOperationAsync(
                 "撤销 " + record.Display,
                 _service.UndoAsync(record.RecordId, overwrite, new Progress<string>(AppendLog)));
@@ -450,6 +488,85 @@ public sealed class PluginManagerViewModel : ViewModelBase
             IsBusy = false;
             Status = "检查撤销冲突失败：" + ex.Message;
             AppendLog("检查撤销冲突异常：" + ex);
+        }
+    }
+
+    private async Task ExportPackageAsync()
+    {
+        if (SelectedProfile == null || !CheckIdle())
+            return;
+        var path = ExportPackagePathCallback?.Invoke();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        if (await _dsh.IsRunningAsync()
+            && !await EnsureDshStoppedForOperationAsync("导出插件包"))
+        {
+            return;
+        }
+        await RunOperationAsync("导出插件包", _packageService.ExportAsync(
+            SelectedProfile.Name, path, new Progress<string>(AppendLog)));
+    }
+
+    private async Task ImportPackageAsync()
+    {
+        if (SelectedProfile == null || !CheckIdle())
+            return;
+        var path = ImportPackagePathCallback?.Invoke();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        try
+        {
+            var preview = await RunWithBusyAsync(
+                "分析插件包…",
+                () => _packageService.PreviewImportAsync(SelectedProfile.Name, path));
+            if (preview == null)
+            {
+                NoticeCallback?.Invoke("插件包无效", "无法读取插件包，请确认 .dshpkg 文件未损坏。");
+                return;
+            }
+
+            IReadOnlyList<string>? selected;
+            if (ImportPreviewCallback != null)
+            {
+                selected = ImportPreviewCallback(preview);
+                if (selected == null)
+                    return;
+            }
+            else
+            {
+                var prompt = new PluginConfirmPrompt
+                {
+                    Title = "导入插件包",
+                    Message = "导入只会新增当前缺失的插件，已存在的插件不会替换。是否继续？",
+                };
+                if (ConfirmCallback != null && !ConfirmCallback(prompt))
+                    return;
+                selected = preview.Additions;
+            }
+
+            var selectedNames = selected;
+            if (selectedNames.Count == 0)
+            {
+                NoticeCallback?.Invoke("未选择插件", "没有勾选要导入的插件。");
+                return;
+            }
+
+            // 与屏蔽/卸载复用：dsh 运行时先弹红色停止按钮，再断开。
+            if (await _dsh.IsRunningAsync()
+                && !await EnsureDshStoppedForOperationAsync("导入插件包"))
+            {
+                return;
+            }
+
+            await RunOperationAsync("导入插件包", _packageService.ImportAsync(
+                SelectedProfile.Name, path, selectedNames, new Progress<string>(AppendLog)));
+        }
+        catch (Exception ex)
+        {
+            IsBusy = false;
+            Status = "分析插件包失败：" + ex.Message;
+            AppendLog("分析插件包异常：" + ex);
         }
     }
 

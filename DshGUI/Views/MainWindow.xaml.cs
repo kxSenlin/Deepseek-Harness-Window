@@ -154,6 +154,7 @@ namespace DshGUI.Views
         private Action? _secondaryAction;
         private SettingsViewModel? _settingsViewModel;
         private PluginManagerService? _pluginManager;
+        private PluginPackageService? _pluginPackage;
         private PluginManagerWindow? _pluginWindow;
         private ToastWindow? _approvalToast;
         private ToastWindow? _disconnectToast;
@@ -860,7 +861,9 @@ namespace DshGUI.Views
                 }
 
                 _pluginManager ??= new PluginManagerService(_dsh, RestartManagedDshAsync);
-                _pluginWindow = new PluginManagerWindow(_pluginManager, _dsh, RestartManagedDshAsync, this, _theme);
+                _pluginPackage ??= new PluginPackageService(_pluginManager);
+                _pluginWindow = new PluginManagerWindow(
+                    _pluginManager, _pluginPackage, _dsh, RestartManagedDshAsync, this, _theme);
                 _pluginWindow.Closed += (_, _) => _pluginWindow = null;
                 _pluginWindow.Show();
             }
@@ -891,7 +894,7 @@ namespace DshGUI.Views
         {
             CloseSettings();
 
-            _settingsViewModel = new SettingsViewModel(_settings)
+            _settingsViewModel = new SettingsViewModel(_settings, _dsh)
             {
                 NoticeCallback = (title, message) =>
                 {

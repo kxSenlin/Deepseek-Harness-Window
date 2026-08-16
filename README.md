@@ -56,6 +56,7 @@ DeepSeek Harness（`dsh`）的 Windows WPF 启动器：把 `dsh web` 的界面�
 - **操作台（标题栏拼图按钮）**：独立窗口查看各 Profile 实际加载的插件行（id/name/来源/实体/状态）。
 - **屏蔽 / 解除屏蔽**：运行中的 dsh 先弹红色停止按钮，内置核心行有启动失败警告，修改后提示手动重启。
 - **卸载**：官方依赖走 `dsh plugin remove`，手工插件同步删除实体与 patch 引用，内置行只提供屏蔽。
+- **插件包导出 / 导入**：`.dshpkg` 携带入口配置与本地插件源码；导入前显示重名与新增列表，已有插件不替换，本地插件离线恢复。
 - **会话内撤销**：卸载前完整暂存 profile，冲突文件会列出并确认；DshGUI 退出后撤销副本清理。
 - **离线恢复**：dsh 因插件崩溃/卡死时仍可按入口文件盘点，屏蔽或卸载可疑插件后重启。
 
@@ -93,6 +94,7 @@ DeepSeek Harness（`dsh`）的 Windows WPF 启动器：把 `dsh web` 的界面�
 - 左侧是入口文件实际加载的插件行；右侧「已安装依赖」列出 `package.json.dependencies`，bundle 包会生成左侧插件行，普通依赖只能从右侧卸载。
 - 选中插件行可「屏蔽 / 解除屏蔽」：运行中的 dsh 会先弹红色「停止 DeepSeek Harness」按钮；内置核心行有启动失败警告；写 profile（或 home）的 `cordis.patch.yml`，完成后提示手动重启 dsh。
 - 选中依赖或手工插件行可「卸载」：官方依赖走 `dsh plugin remove`，手工行同步删实体与 patch 引用；内置行只提供屏蔽。
+- 「导出插件包」把入口配置与本地插件源码打成 `.dshpkg`，不打包 node_modules；「导入插件包」先显示重名/新增列表并勾选要导入的插件，已有插件不替换，本地插件离线恢复，远程插件按 lockfile 重建。
 - 右侧「本会话卸载记录」可撤销本次 DshGUI 运行期间的卸载；卸载后文件被改动时，撤销前会列出变化文件并要求确认；DshGUI 退出后撤销副本清理。
 - dsh 启动失败/卡死时，操作台仍按入口文件离线盘点，可先屏蔽可疑插件再重启。
 - 底部日志与上方列表之间有分隔条，可上下拖动调整高度。
@@ -109,7 +111,8 @@ DshGUI/
     ├── Assets/App.ico               应用图标（由 dsh 的 favicon.svg 生成）
     ├── Models/
     │   ├── AppSettings.cs        持久化设置模型
-    │   └── PluginModels.cs       插件行/卸载分类/撤销记录
+    │   ├── PluginModels.cs       插件行/卸载分类/撤销记录
+    │   └── PluginPackageModels.cs 插件包清单与导入预览
     ├── ViewModels/
     │   ├── ViewModelBase.cs         INotifyPropertyChanged 基类
     │   ├── MainViewModel.cs         主窗口状态
@@ -122,14 +125,17 @@ DshGUI/
     │   ├── PluginConfirmDialog.xaml(.cs) 危险操作确认/插件名输入
     │   ├── PluginNoticeDialog.xaml(.cs)  醒目提示弹窗
     │   ├── PluginStopDshDialog.xaml(.cs) 停止 DeepSeek Harness 确认弹窗
+    │   ├── PluginImportPreviewDialog.xaml(.cs) 插件包导入预览与勾选
     │   └── ToastWindow.xaml(.cs)    右下角通知
     ├── Services/
     │   ├── DshService.cs            dsh/Node 检测、安装（镜像源+进度）、端口配置、拉起、日志
     │   ├── DshPaths.cs              DSH_HOME、profile、dsh 安装根、模块解析
-    │   ├── DshCliService.cs         dump-config / plugin remove（超时+安全参数）
+    │   ├── DshCliService.cs         dump-config / plugin remove / plugin install
     │   ├── PatchDocument.cs         cordis.patch.yml 行级解析与编辑
     │   ├── PluginInventory.cs       离线组合 + dump-config 事实解析
     │   ├── PluginManagerService.cs  屏蔽/卸载/撤销流程与暂存
+    │   ├── PluginPackageService.cs  .dshpkg 导出/导入/预览
+    │   ├── PluginInventoryBaseline.cs 跨运行首次盘点基线
     │   ├── ProfileManifestEditor.cs package.json 最小编辑
     │   ├── DshFileSystem.cs         junction/hardlink/原子写/哈希规则
     │   ├── ThemeService.cs          主题解析 + WebView2 联动

@@ -17,6 +17,7 @@ public sealed class SettingsViewModel : ViewModelBase
     public const string MirrorRegistry = "https://registry.npmmirror.com";
 
     private readonly SettingsService _settings;
+    private readonly DshService _dsh;
 
     private int _themeIndex;
     private int _registryIndex;
@@ -27,10 +28,12 @@ public sealed class SettingsViewModel : ViewModelBase
     private bool _hotkeyEnabled;
     private int _hotkeyModifiers;
     private int _hotkeyKey;
+    private string _stopDshStatus = "";
 
-    public SettingsViewModel(SettingsService settings)
+    public SettingsViewModel(SettingsService settings, DshService dsh)
     {
         _settings = settings;
+        _dsh = dsh;
         _themeIndex = (int)settings.Settings.Theme;
         _registryIndex = settings.Settings.NpmRegistry == MirrorRegistry ? 1 : 0;
         _dshPortText = settings.Settings.DshPort.ToString();
@@ -43,6 +46,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
         SaveCommand = new RelayCommand(_ => SaveAsync());
         CancelCommand = new RelayCommand(_ => RequestClose?.Invoke());
+        StopDshCommand = new RelayCommand(_ => StopDshAsync());
     }
 
     /// <summary>UI 注入：普通提示框。</summary>
@@ -99,6 +103,14 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public ICommand CancelCommand { get; }
 
+    public ICommand StopDshCommand { get; }
+
+    public string StopDshStatus
+    {
+        get => _stopDshStatus;
+        private set => SetProperty(ref _stopDshStatus, value);
+    }
+
     public event Action? RequestClose;
 
     public event Action? SettingsChanged;
@@ -108,6 +120,28 @@ public sealed class SettingsViewModel : ViewModelBase
         _hotkeyModifiers = modifiers;
         _hotkeyKey = key;
         OnPropertyChanged(nameof(HotkeyDisplay));
+    }
+
+    private async void StopDshAsync()
+    {
+        StopDshStatus = "正在关闭 DeepSeek Harness…";
+        try
+        {
+            if (!await _dsh.IsRunningAsync())
+            {
+                StopDshStatus = "当前没有运行中的 DeepSeek Harness。";
+                return;
+            }
+
+            var stopped = await _dsh.StopRunningDshAsync();
+            StopDshStatus = stopped
+                ? "DeepSeek Harness 已关闭。"
+                : "关闭失败：端口仍被其他程序占用，请检查后重试。";
+        }
+        catch (Exception ex)
+        {
+            StopDshStatus = "关闭失败：" + ex.Message;
+        }
     }
 
     private async void SaveAsync()

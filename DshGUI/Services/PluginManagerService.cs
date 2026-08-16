@@ -16,34 +16,55 @@ public sealed class PluginManagerService : IDisposable
     private readonly DshService _dsh;
     private readonly Func<Task> _restartDsh;
     private readonly string _sessionId = Guid.NewGuid().ToString("N");
-    private readonly HashSet<string> _existingRows = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _existingPackages = new(StringComparer.Ordinal);
+    private readonly PluginInventoryBaseline _baseline;
     private int _undoSequence;
 
     public PluginManagerService(DshService dsh, Func<Task> restartDsh)
     {
         _dsh = dsh;
         _restartDsh = restartDsh;
+        _baseline = PluginInventoryBaseline.Load();
     }
 
     private string SessionRoot => Path.Combine(LocalAppData, AppDataDirectoryName, "uninstall-undo", _sessionId);
 
     private string MutationRoot => Path.Combine(LocalAppData, AppDataDirectoryName, "plugin-ops", _sessionId);
 
-    /// <summary>首次盘点后调用：既有插件卸载时必须双重严格确认。</summary>
+    /// <summary>
+    /// 首次盘点基线跨运行保存：某 Profile 第一次被 DshGUI 盘点时建立，
+    /// 之后启动只读基线并剔除已不在入口的项；卸载后重装不算首次盘点已存在。
+    /// </summary>
     public void MarkInventory(PluginProfileSnapshot snapshot)
     {
-        foreach (var row in snapshot.Rows)
-            _existingRows.Add(snapshot.ProfileName + "|" + row.Id);
-        foreach (var package in snapshot.Packages)
-            _existingPackages.Add(snapshot.ProfileName + "|" + package.Name);
+        var profile = _baseline.GetOrCreate(snapshot.ProfileName, snapshot);
+        var currentRowIds = snapshot.Rows.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var currentPackages = snapshot.Packages.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var changed = profile.Rows.RemoveWhere(id => !currentRowIds.Contains(id)) > 0;
+        changed |= profile.Packages.RemoveWhere(name => !currentPackages.Contains(name)) > 0;
+        if (changed)
+            _baseline.Save();
     }
 
     public bool IsExistingRow(string profileName, string rowId) =>
-        _existingRows.Contains(profileName + "|" + rowId);
+        _baseline.Profiles.TryGetValue(profileName, out var profile)
+        && profile.Rows.Contains(rowId);
 
     public bool IsExistingPackage(string profileName, string packageName) =>
-        _existingPackages.Contains(profileName + "|" + packageName);
+        _baseline.Profiles.TryGetValue(profileName, out var profile)
+        && profile.Packages.Contains(packageName);
+
+    private void RemoveFromBaseline(string profileName, IEnumerable<string> rowIds, string packageName)
+    {
+        if (!_baseline.Profiles.TryGetValue(profileName, out var profile))
+            return;
+        var changed = false;
+        foreach (var rowId in rowIds)
+            changed |= profile.Rows.Remove(rowId);
+        if (!string.IsNullOrWhiteSpace(packageName))
+            changed |= profile.Packages.Remove(packageName);
+        if (changed)
+            _baseline.Save();
+    }
 
     // ------------------------------------------------------------------
     // 屏蔽 / 解除屏蔽
@@ -322,6 +343,7 @@ public sealed class PluginManagerService : IDisposable
                 data.ExternalBackups = externalBackups;
                 await SaveRecordAsync(recordDir, data);
                 log.Report($"卸载完成；撤销副本：{recordDir}");
+                RemoveFromBaseline(profileName, relatedRowIds, packageName);
 
                 await RestartManagedDshAsync(log);
                 return PluginOperationResult.Ok($"已卸载 {packageName}，并可从本会话撤销");
@@ -447,7 +469,7 @@ public sealed class PluginManagerService : IDisposable
     // 校验
     // ------------------------------------------------------------------
 
-    private async Task<(bool Valid, string Message)> ValidateProfileAsync(string profileName, IProgress<string> log)
+    public async Task<(bool Valid, string Message)> ValidateProfileAsync(string profileName, IProgress<string> log)
     {
         var errors = new List<string>();
         AddManifestParseError(profileName, errors);
@@ -810,7 +832,7 @@ public sealed class PluginManagerService : IDisposable
     // dsh 协调
     // ------------------------------------------------------------------
 
-    private async Task<(bool Success, string Message)> StopDshForOperationAsync(IProgress<string> log)
+    public async Task<(bool Success, string Message)> StopDshForOperationAsync(IProgress<string> log)
     {
         if (_dsh.IsManagedProcessRunning)
         {
