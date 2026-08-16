@@ -86,8 +86,8 @@ public sealed class PluginManagerViewModel : ViewModelBase
     /// <summary>UI 注入：选择 .dshpkg 文件；返回 null 表示取消。</summary>
     public Func<string?>? ImportPackagePathCallback { get; set; }
 
-    /// <summary>UI 注入：显示导入预览并返回用户勾选的插件名；返回 null 表示取消。</summary>
-    public Func<PluginImportPreview, IReadOnlyList<string>?>? ImportPreviewCallback { get; set; }
+    /// <summary>UI 注入：显示导入预览并返回目标 Profile 与勾选的插件名；返回 null 表示取消。</summary>
+    public Func<PluginImportPreview, PluginImportSelection?>? ImportPreviewCallback { get; set; }
 
     public PluginProfileOption? SelectedProfile
     {
@@ -517,6 +517,18 @@ public sealed class PluginManagerViewModel : ViewModelBase
 
         try
         {
+            var validation = await Task.Run(() => _packageService.ValidatePackage(path));
+            if (!validation.Valid)
+            {
+                NoticeCallback?.Invoke("插件包无效", string.Join("\n", validation.Errors));
+                return;
+            }
+
+            if (validation.Warnings.Count > 0)
+            {
+                AppendLog("插件包警告：" + string.Join("；", validation.Warnings));
+            }
+
             var preview = await RunWithBusyAsync(
                 "分析插件包…",
                 () => _packageService.PreviewImportAsync(SelectedProfile.Name, path));
@@ -526,12 +538,17 @@ public sealed class PluginManagerViewModel : ViewModelBase
                 return;
             }
 
-            IReadOnlyList<string>? selected;
+            preview.AvailableProfiles = Profiles.Select(p => p.Name).ToList();
+
+            string targetProfile;
+            IReadOnlyList<string> selectedNames;
             if (ImportPreviewCallback != null)
             {
-                selected = ImportPreviewCallback(preview);
-                if (selected == null)
+                var selection = ImportPreviewCallback(preview);
+                if (selection == null)
                     return;
+                targetProfile = selection.ProfileName;
+                selectedNames = selection.SelectedNames;
             }
             else
             {
@@ -542,13 +559,13 @@ public sealed class PluginManagerViewModel : ViewModelBase
                 };
                 if (ConfirmCallback != null && !ConfirmCallback(prompt))
                     return;
-                selected = preview.Additions;
+                targetProfile = SelectedProfile.Name;
+                selectedNames = preview.Additions;
             }
 
-            var selectedNames = selected;
-            if (selectedNames.Count == 0)
+            if (string.IsNullOrWhiteSpace(targetProfile) || selectedNames.Count == 0)
             {
-                NoticeCallback?.Invoke("未选择插件", "没有勾选要导入的插件。");
+                NoticeCallback?.Invoke("导入信息不完整", "请选择目标 Profile，并勾选要导入的插件。");
                 return;
             }
 
@@ -560,7 +577,7 @@ public sealed class PluginManagerViewModel : ViewModelBase
             }
 
             await RunOperationAsync("导入插件包", _packageService.ImportAsync(
-                SelectedProfile.Name, path, selectedNames, new Progress<string>(AppendLog)));
+                targetProfile, path, selectedNames, new Progress<string>(AppendLog)));
         }
         catch (Exception ex)
         {

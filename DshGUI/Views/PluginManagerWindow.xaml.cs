@@ -57,11 +57,11 @@ public partial class PluginManagerWindow : Window
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 
-    private IReadOnlyList<string>? ShowImportPreview(PluginImportPreview preview)
+    private PluginImportSelection? ShowImportPreview(PluginImportPreview preview)
     {
         var dialog = new PluginImportPreviewDialog(preview) { Owner = this };
         _theme.ApplyWindowTitleBar(dialog);
-        return dialog.ShowDialog() == true ? dialog.SelectedNames : null;
+        return dialog.ShowDialog() == true ? dialog.Selection : null;
     }
 
     private void OnThemeChanged() => _theme.ApplyWindowTitleBar(this);

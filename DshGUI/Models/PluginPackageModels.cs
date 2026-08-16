@@ -5,8 +5,6 @@ public sealed class PluginPackageManifest
 {
     public int FormatVersion { get; set; } = 1;
 
-    public string ProfileName { get; set; } = "";
-
     public Dictionary<string, string> Dependencies { get; set; } = new(StringComparer.Ordinal);
 
     public List<string> Bundles { get; set; } = [];
@@ -36,14 +34,34 @@ public sealed class PluginImportPreviewItem
     public bool IsSelectable => !IsDuplicate;
 }
 
+/// <summary>插件包格式自检结果。</summary>
+public sealed class PluginPackageValidation
+{
+    public bool Valid => Errors.Count == 0;
+
+    public List<string> Errors { get; set; } = [];
+
+    public List<string> Warnings { get; set; } = [];
+}
+
 /// <summary>导入前预览：哪些已存在会跳过，哪些可勾选新增。</summary>
 public sealed class PluginImportPreview
 {
     public string ProfileName { get; set; } = "";
+
+    public List<string> AvailableProfiles { get; set; } = [];
 
     public List<PluginImportPreviewItem> Items { get; set; } = [];
 
     public List<string> Duplicates { get; set; } = [];
 
     public List<string> Additions { get; set; } = [];
+}
+
+/// <summary>用户在导入预览窗口中的选择结果。</summary>
+public sealed class PluginImportSelection
+{
+    public string ProfileName { get; set; } = "";
+
+    public IReadOnlyList<string> SelectedNames { get; set; } = [];
 }

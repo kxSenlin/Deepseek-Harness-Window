@@ -51,7 +51,6 @@ public sealed class PluginPackageService
 
                 var manifest = new PluginPackageManifest
                 {
-                    ProfileName = profileName,
                     Dependencies = new Dictionary<string, string>(snapshot.Dependencies, StringComparer.Ordinal),
                     Bundles = snapshot.Bundles.Select(b => b.Name).ToList(),
                 };
@@ -125,8 +124,119 @@ public sealed class PluginPackageService
         }
     }
 
+    /// <summary>打开 .dshpkg 后、实际导入前做格式自检，不修改任何 profile 文件。</summary>
+    public PluginPackageValidation ValidatePackage(string packagePath)
+    {
+        var result = new PluginPackageValidation();
+        var temp = CreateTempDir("dshpkg-validate");
+        try
+        {
+            try
+            {
+                ZipFile.ExtractToDirectory(packagePath, temp);
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add("无法打开插件包：" + ex.Message);
+                return result;
+            }
+
+            var manifestPath = Path.Combine(temp, ManifestFile);
+            if (!File.Exists(manifestPath))
+            {
+                result.Errors.Add("缺少 manifest.json");
+                return result;
+            }
+
+            PluginPackageManifest? manifest;
+            try
+            {
+                manifest = JsonSerializer.Deserialize<PluginPackageManifest>(File.ReadAllText(manifestPath));
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add("manifest.json 无法解析：" + ex.Message);
+                return result;
+            }
+
+            if (manifest == null)
+            {
+                result.Errors.Add("manifest.json 内容为空");
+                return result;
+            }
+
+            if (manifest.FormatVersion != 1)
+                result.Errors.Add($"不支持的插件包版本：{manifest.FormatVersion}");
+
+            var packageJsonPath = Path.Combine(temp, ProfileFolder, "package.json");
+            if (!File.Exists(packageJsonPath))
+            {
+                result.Errors.Add("缺少 profile/package.json");
+            }
+            else
+            {
+                try
+                {
+                    if (JsonNode.Parse(File.ReadAllText(packageJsonPath)) is not JsonObject)
+                        result.Errors.Add("profile/package.json 顶层不是 JSON 对象");
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add("profile/package.json 无法解析：" + ex.Message);
+                }
+            }
+
+            foreach (var local in manifest.LocalPlugins)
+            {
+                if (string.IsNullOrWhiteSpace(local.Key) || string.IsNullOrWhiteSpace(local.PackageName))
+                {
+                    result.Errors.Add("本地插件条目缺少 Key 或 PackageName");
+                    continue;
+                }
+
+                if (!Directory.Exists(Path.Combine(temp, LocalPluginsFolder, local.Key)))
+                    result.Errors.Add($"本地插件目录缺失：{local.Key}");
+            }
+
+            foreach (var remote in manifest.RemoteDependencies)
+            {
+                if (!manifest.Dependencies.TryGetValue(remote, out var spec) || string.IsNullOrWhiteSpace(spec))
+                    result.Errors.Add($"远程依赖缺少 spec：{remote}");
+            }
+
+            var patchPath = Path.Combine(temp, ProfileFolder, "cordis.patch.yml");
+            if (File.Exists(patchPath))
+            {
+                try
+                {
+                    var doc = PatchDocument.Load(patchPath);
+                    if (!doc.ValidateStructure(out var error))
+                        result.Errors.Add($"profile/cordis.patch.yml 结构异常：{error}");
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add("profile/cordis.patch.yml 无法解析：" + ex.Message);
+                }
+            }
+
+            if (!File.Exists(Path.Combine(temp, ProfileFolder, "pnpm-lock.yaml")))
+                result.Warnings.Add("缺少 pnpm-lock.yaml，导入后将重新解析依赖");
+            if (!File.Exists(Path.Combine(temp, ProfileFolder, "pnpm-workspace.yaml")))
+                result.Warnings.Add("缺少 pnpm-workspace.yaml，将使用当前 profile 设置");
+        }
+        finally
+        {
+            TryDeleteDirectory(temp);
+        }
+
+        return result;
+    }
+
     public async Task<PluginImportPreview?> PreviewImportAsync(string profileName, string packagePath)
     {
+        if (!ValidatePackage(packagePath).Valid)
+            return null;
+
         var temp = CreateTempDir("dshpkg-preview");
         try
         {
@@ -407,6 +517,28 @@ public sealed class PluginPackageService
         finally
         {
             TryDeleteDirectory(temp);
+            CleanupImportBackups();
+        }
+    }
+
+    private static void CleanupImportBackups()
+    {
+        try
+        {
+            if (!Directory.Exists(BackupRoot))
+                return;
+
+            const int keep = 5;
+            foreach (var old in Directory.EnumerateDirectories(BackupRoot)
+                         .OrderByDescending(Directory.GetLastWriteTime)
+                         .Skip(keep))
+            {
+                TryDeleteDirectory(old);
+            }
+        }
+        catch
+        {
+            // 清理旧备份失败不影响导入结果。
         }
     }
 

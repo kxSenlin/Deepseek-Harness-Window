@@ -1,6 +1,5 @@
 using System.Windows;
 using DshGUI.Models;
-using DshGUI.Services;
 
 namespace DshGUI.Views;
 
@@ -10,6 +9,10 @@ public partial class PluginImportPreviewDialog : Window
     {
         InitializeComponent();
         Title = $"导入插件包：{preview.ProfileName}";
+        ProfileCombo.ItemsSource = preview.AvailableProfiles.Count > 0
+            ? preview.AvailableProfiles
+            : [preview.ProfileName];
+        ProfileCombo.SelectedItem = preview.ProfileName;
         DuplicatesList.ItemsSource = preview.Duplicates.Count > 0
             ? preview.Duplicates
             : ["（无重名插件）"];
@@ -18,12 +21,15 @@ public partial class PluginImportPreviewDialog : Window
             .ToList();
     }
 
-    public IReadOnlyList<string> SelectedNames =>
-        AdditionsItemsControl.ItemsSource
+    public PluginImportSelection Selection => new()
+    {
+        ProfileName = ProfileCombo.SelectedItem as string ?? "",
+        SelectedNames = AdditionsItemsControl.ItemsSource
             .Cast<PluginImportPreviewItem>()
             .Where(item => item.IsSelected)
             .Select(item => item.Name)
-            .ToList();
+            .ToList(),
+    };
 
     private void OnContinueClick(object sender, RoutedEventArgs e) => DialogResult = true;
 }
