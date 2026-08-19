@@ -162,6 +162,7 @@ namespace DshGUI.Views
         private IntPtr _hwnd;
         private bool _updateChecked;
         private bool _manualUpdateCheck;
+        private bool _updateInProgress;
         private CoreWebView2? _wiredCore;
 
         /// <summary>开机自启 + 静默模式：窗口不显示，只在托盘后台运行。</summary>
@@ -450,6 +451,7 @@ namespace DshGUI.Views
 
         private void ShowLoading(string message, bool showLog, bool clearLog = true)
         {
+            LoadingPanel.Visibility = Visibility.Visible;
             StatusText.Text = message;
             InstallProgress.Visibility = Visibility.Visible;
             LogContainer.Visibility = showLog ? Visibility.Visible : Visibility.Collapsed;
@@ -485,13 +487,18 @@ namespace DshGUI.Views
             SetActions("立即安装", InstallDshAsync, "取消", CancelInstall);
         }
 
-        private void ShowFailed(string message)
+        private void ShowFailed(
+            string message,
+            string primaryText = "重试",
+            Action? primary = null,
+            string? secondaryText = null,
+            Action? secondary = null)
         {
             StopElapsed();
             StatusText.Text = message;
             InstallProgress.Visibility = Visibility.Collapsed;
             // 保留日志便于排查。
-            SetActions("重试", RetryAsync);
+            SetActions(primaryText, primary ?? RetryAsync, secondaryText, secondary);
         }
 
         private void ShowFatal(string message)
@@ -656,12 +663,49 @@ namespace DshGUI.Views
 
         private async void UpdateNow()
         {
-            _notification.Show("正在更新", "正在更新 DeepSeek Harness…");
-            var ok = await _dsh.InstallAsync(_settings.Settings.NpmRegistry);
-            _notification.Show(
-                ok ? "更新完成" : "更新失败",
-                ok ? "请重启应用以生效。" : "请手动执行 npm install -g @deepseek-ai/dsh");
+            if (_updateInProgress)
+                return;
+
+            _updateInProgress = true;
+            try
+            {
+                await UpdateDshAsync();
+            }
+            finally
+            {
+                _updateInProgress = false;
+            }
         }
+
+        private async Task UpdateDshAsync()
+        {
+            // 更新前先停掉 dsh，再复用启动/安装面板显示 npm install 的完整日志和进度。
+            _healthTimer.Stop();
+            _viewModel.ShowMainWindow();
+            WebView.Visibility = Visibility.Collapsed;
+            ShowLoading("正在更新 DeepSeek Harness…", showLog: true);
+
+            AppendLogLine("—— 停止正在运行的 dsh ——");
+            var stopped = await _dsh.StopRunningDshAsync(new Progress<string>(AppendLogLine));
+            if (!stopped)
+            {
+                ShowFailed("更新失败：无法停止当前运行的 dsh。请检查端口占用后重试。", "重试更新", UpdateNow, "启动 dsh", RetryAsync);
+                return;
+            }
+
+            AppendLogLine("—— 开始更新 ——");
+            AppendLogLine($"npm install -g @deepseek-ai/dsh --registry {_settings.Settings.NpmRegistry} --no-fund --no-audit --loglevel=http");
+            var ok = await _dsh.InstallAsync(_settings.Settings.NpmRegistry, new Progress<string>(AppendLogLine));
+            if (!ok)
+            {
+                ShowFailed("更新失败。请查看上方日志，或手动执行 npm install -g @deepseek-ai/dsh。", "重试更新", UpdateNow, "启动 dsh", RetryAsync);
+                return;
+            }
+
+            AppendLogLine("—— 更新完成，正在重新启动 ——");
+            await StartDshAndWaitAsync();
+        }
+
 
         private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {

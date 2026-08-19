@@ -30,6 +30,9 @@ namespace DshGUI
             _settings = new SettingsService();
             _settings.Load();
 
+            // 旧版本把开机自启写在 HKCU\...\Run；升级后迁移到 Startup 文件夹快捷方式，避免旧注册表项继续生效。
+            AutoStartService.MigrateLegacyRunKey(_settings.Settings.AutoStart);
+
             // 旧配置或手改 settings.json 可能保存了不安全的端口；启动时回退到 3080。
             if (DshService.GetPortError(_settings.Settings.DshPort) != null)
             {

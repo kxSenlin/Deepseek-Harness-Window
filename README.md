@@ -48,7 +48,7 @@ DeepSeek Harness（`dsh`）的 Windows WPF 启动器：把 `dsh web` 的界面�
 - **忙完通知**：agent 空闲且窗口最小化/托盘时弹 Toast，带会话标题，点击回主窗口。
 - **权限审批提醒**：窗口不在前台时弹持久 Toast，点击唤起窗口，审批解决后自动消失。
 - **全局快捷键**（可录制，默认关）：显示/隐藏窗口。
-- **开机自启**：写 `HKCU\...\Run` 注册表项。
+- **开机自启**：在用户 Startup 文件夹创建 `DshGUI.lnk` 快捷方式（启动时自动清理旧版注册表项）。
 - **单实例**：二次启动打开已有窗口。
 
 ### 插件管理
@@ -144,7 +144,7 @@ DshGUI/
     │   ├── TrayService.cs           托盘图标 + 右键菜单
     │   ├── NotificationService.cs   通知队列（右下角纵向堆叠）
     │   ├── UpdateService.cs         npm 版本检查（System.Version，忽略预发布后缀）
-    │   ├── AutoStartService.cs      开机自启（注册表）
+    │   ├── AutoStartService.cs      开机自启（Startup 文件夹快捷方式）
     │   ├── SingleInstanceService.cs 单实例（Mutex + 事件聚焦）
     │   └── SettingsService.cs       %LOCALAPPDATA%\DshGUI\settings.json 读写
     └── Infrastructure/
