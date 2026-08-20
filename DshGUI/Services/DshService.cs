@@ -242,8 +242,8 @@ public sealed class DshService
     {
         var dsh = DshPaths.FindOnPath("dsh");
         var commandLine = dsh != null
-            ? $"\"{dsh}\" web --port {Port}"
-            : $"npx --registry {registry} @deepseek-ai/dsh web --port {Port}";
+            ? $"\"{dsh}\" web --port {Port} --no-open"
+            : $"npx --registry {registry} @deepseek-ai/dsh web --port {Port} --no-open";
 
         var psi = new ProcessStartInfo
         {
