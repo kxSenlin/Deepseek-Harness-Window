@@ -7,18 +7,34 @@ public sealed class UpdateService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    public async Task<string?> GetLatestVersionAsync(string registry)
+    /// <summary>
+    /// 读取 npm dist-tags 中的 latest 与 next：
+    /// latest 作为首选更新通道，next 作为可选预览版通道。
+    /// </summary>
+    public async Task<(string? Latest, string? Preview)> GetAvailableVersionsAsync(string registry)
     {
         try
         {
-            var url = registry.TrimEnd('/') + "/@deepseek-ai/dsh/latest";
+            var url = registry.TrimEnd('/') + "/@deepseek-ai/dsh";
             var json = await Http.GetStringAsync(url);
             using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.GetProperty("version").GetString();
+
+            string? latest = null;
+            string? preview = null;
+            if (doc.RootElement.TryGetProperty("dist-tags", out var distTags)
+                && distTags.ValueKind == JsonValueKind.Object)
+            {
+                if (distTags.TryGetProperty("latest", out var latestElement))
+                    latest = latestElement.GetString();
+                if (distTags.TryGetProperty("next", out var nextElement))
+                    preview = nextElement.GetString();
+            }
+
+            return (latest, preview);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 

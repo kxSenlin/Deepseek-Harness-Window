@@ -196,12 +196,16 @@ public sealed class DshService
         return null;
     }
 
-    public async Task<bool> InstallAsync(string registry, IProgress<string>? progress = null)
+    public async Task<bool> InstallAsync(string registry, IProgress<string>? progress = null, string? distTag = null)
     {
+        var package = string.IsNullOrWhiteSpace(distTag) ? "@deepseek-ai/dsh" : $"@deepseek-ai/dsh@{distTag}";
+        if (distTag != null && !distTag.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_'))
+            return false;
+
         var psi = new ProcessStartInfo
         {
             FileName = "cmd.exe",
-            Arguments = $"/c npm install -g @deepseek-ai/dsh --registry {registry} --no-fund --no-audit --loglevel=http",
+            Arguments = $"/c npm install -g {package} --registry {registry} --no-fund --no-audit --loglevel=http",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

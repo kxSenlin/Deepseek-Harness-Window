@@ -56,7 +56,6 @@ namespace DshGUI
             MainWindow = _mainWindow;
             _tray.OpenRequested += () => _mainWindow.Dispatcher.Invoke(() => _viewModel.ShowMainWindow());
             _tray.PluginManagerRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.OpenPluginManager());
-            _tray.CheckUpdateRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.TriggerUpdateCheck());
             _tray.ExitRequested += () => _mainWindow.Dispatcher.Invoke(() =>
             {
                 _viewModel.AllowRealClose = true;

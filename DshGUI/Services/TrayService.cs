@@ -21,7 +21,6 @@ public sealed class TrayService : IDisposable
         var menu = new ContextMenuStrip();
         menu.Items.Add("打开 DeepSeek Harness", null, (_, _) => OpenRequested?.Invoke());
         menu.Items.Add("插件管理", null, (_, _) => PluginManagerRequested?.Invoke());
-        menu.Items.Add("检查更新", null, (_, _) => CheckUpdateRequested?.Invoke());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (_, _) => ExitRequested?.Invoke());
 
@@ -47,8 +46,6 @@ public sealed class TrayService : IDisposable
     public event Action? OpenRequested;
 
     public event Action? PluginManagerRequested;
-
-    public event Action? CheckUpdateRequested;
 
     public event Action? ExitRequested;
 

@@ -144,7 +144,6 @@ namespace DshGUI.Views
         private readonly ThemeService _theme;
         private readonly TrayService _tray;
         private readonly NotificationService _notification = new();
-        private readonly UpdateService _update = new();
 
         private readonly DispatcherTimer _elapsedTimer = new() { Interval = TimeSpan.FromSeconds(1) };
         private readonly DispatcherTimer _healthTimer = new() { Interval = TimeSpan.FromSeconds(3) };
@@ -160,8 +159,6 @@ namespace DshGUI.Views
         private ToastWindow? _disconnectToast;
 
         private IntPtr _hwnd;
-        private bool _updateChecked;
-        private bool _manualUpdateCheck;
         private bool _updateInProgress;
         private CoreWebView2? _wiredCore;
 
@@ -613,7 +610,6 @@ namespace DshGUI.Views
 
         private void Navigate()
         {
-            WebView.NavigationCompleted += OnNavigationCompleted;
             StopElapsed();
             LoadingPanel.Visibility = Visibility.Collapsed;
             WebView.Visibility = Visibility.Visible;
@@ -621,47 +617,7 @@ namespace DshGUI.Views
             _healthTimer.Start();
         }
 
-        private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
-        {
-            _ = CheckForUpdatesAsync();
-        }
-
-        private async Task CheckForUpdatesAsync()
-        {
-            if (_updateChecked)
-                return;
-            _updateChecked = true;
-            var manual = _manualUpdateCheck;
-            _manualUpdateCheck = false;
-
-            var latest = await _update.GetLatestVersionAsync(_settings.Settings.NpmRegistry);
-            var installed = UpdateService.GetInstalledVersion();
-            if (!UpdateService.IsNewer(latest, installed))
-            {
-                if (manual)
-                {
-                    var current = string.IsNullOrEmpty(installed) ? "未知" : installed;
-                    _notification.Show(
-                        latest == null ? "检查更新失败" : "已是最新版本",
-                        latest == null
-                            ? "无法连接 npm registry，请稍后重试。"
-                            : $"DeepSeek Harness 已是最新版本（{current}）");
-                }
-
-                return;
-            }
-
-            _notification.Show("更新可用", $"DeepSeek Harness {latest}（当前 {installed}）", UpdateNow);
-        }
-
-        public void TriggerUpdateCheck()
-        {
-            _updateChecked = false;
-            _manualUpdateCheck = true;
-            _ = CheckForUpdatesAsync();
-        }
-
-        private async void UpdateNow()
+        private async void RunUpdateAsync(string distTag)
         {
             if (_updateInProgress)
                 return;
@@ -669,7 +625,8 @@ namespace DshGUI.Views
             _updateInProgress = true;
             try
             {
-                await UpdateDshAsync();
+                CloseSettings();
+                await UpdateDshAsync(distTag);
             }
             finally
             {
@@ -677,28 +634,28 @@ namespace DshGUI.Views
             }
         }
 
-        private async Task UpdateDshAsync()
+        private async Task UpdateDshAsync(string distTag)
         {
             // 更新前先停掉 dsh，再复用启动/安装面板显示 npm install 的完整日志和进度。
             _healthTimer.Stop();
             _viewModel.ShowMainWindow();
             WebView.Visibility = Visibility.Collapsed;
-            ShowLoading("正在更新 DeepSeek Harness…", showLog: true);
+            ShowLoading($"正在更新 DeepSeek Harness（{(distTag == "latest" ? "最新版" : "预览版 " + distTag)}）…", showLog: true);
 
             AppendLogLine("—— 停止正在运行的 dsh ——");
             var stopped = await _dsh.StopRunningDshAsync(new Progress<string>(AppendLogLine));
             if (!stopped)
             {
-                ShowFailed("更新失败：无法停止当前运行的 dsh。请检查端口占用后重试。", "重试更新", UpdateNow, "启动 dsh", RetryAsync);
+                ShowFailed("更新失败：无法停止当前运行的 dsh。请检查端口占用后重试。", "重试更新", () => RunUpdateAsync(distTag), "启动 dsh", RetryAsync);
                 return;
             }
 
             AppendLogLine("—— 开始更新 ——");
-            AppendLogLine($"npm install -g @deepseek-ai/dsh --registry {_settings.Settings.NpmRegistry} --no-fund --no-audit --loglevel=http");
-            var ok = await _dsh.InstallAsync(_settings.Settings.NpmRegistry, new Progress<string>(AppendLogLine));
+            AppendLogLine($"npm install -g @deepseek-ai/dsh@{distTag} --registry {_settings.Settings.NpmRegistry} --no-fund --no-audit --loglevel=http");
+            var ok = await _dsh.InstallAsync(_settings.Settings.NpmRegistry, new Progress<string>(AppendLogLine), distTag);
             if (!ok)
             {
-                ShowFailed("更新失败。请查看上方日志，或手动执行 npm install -g @deepseek-ai/dsh。", "重试更新", UpdateNow, "启动 dsh", RetryAsync);
+                ShowFailed($"更新失败。请查看上方日志，或手动执行 npm install -g @deepseek-ai/dsh@{distTag}。", "重试更新", () => RunUpdateAsync(distTag), "启动 dsh", RetryAsync);
                 return;
             }
 
@@ -956,6 +913,7 @@ namespace DshGUI.Views
             };
             _settingsViewModel.RequestClose += CloseSettings;
             _settingsViewModel.SettingsChanged += OnSettingsChanged;
+            _settingsViewModel.UpdateRequested += RunUpdateAsync;
             SettingsViewControl.DataContext = _settingsViewModel;
             SettingsViewControl.Visibility = Visibility.Visible;
         }
@@ -966,6 +924,7 @@ namespace DshGUI.Views
             {
                 _settingsViewModel.RequestClose -= CloseSettings;
                 _settingsViewModel.SettingsChanged -= OnSettingsChanged;
+                _settingsViewModel.UpdateRequested -= RunUpdateAsync;
                 _settingsViewModel = null;
             }
 

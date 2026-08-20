@@ -43,6 +43,25 @@
                            Foreground="{DynamicResource SubtleTextBrush}" />
             </StackPanel>
 
+            <TextBlock Text="更新" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <StackPanel Margin="0,0,0,16">
+                <TextBlock Text="{Binding InstalledVersionText}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding UpdateStatusText}"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleTextBrush}" />
+                <Button Content="检查更新" Width="100" Height="28" HorizontalAlignment="Left"
+                        Command="{Binding CheckUpdateCommand}" />
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <Button Content="更新到最新版" Width="140" Height="28"
+                            IsEnabled="{Binding CanUpdateLatest}"
+                            Command="{Binding UpdateLatestCommand}" />
+                    <Button Content="更新到预览版" Width="140" Height="28" Margin="8,0,0,0"
+                            IsEnabled="{Binding CanUpdatePreview}"
+                            Command="{Binding UpdatePreviewCommand}" />
+                </StackPanel>
+            </StackPanel>
+
             <TextBlock Text="主题" FontWeight="SemiBold" Margin="0,0,0,8" />
             <ComboBox SelectedIndex="{Binding ThemeIndex, Mode=TwoWay}" Margin="0,0,0,16">
                 <ComboBoxItem Content="跟随系统" />
