@@ -8,6 +8,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 using DshGUI.Infrastructure;
 using DshGUI.Services;
 using DshGUI.ViewModels;
@@ -168,6 +169,16 @@ namespace DshGUI.Views
         public MainWindow(MainViewModel viewModel, SettingsService settings, DshService dsh, ThemeService theme, TrayService tray)
         {
             InitializeComponent();
+
+            // 把 WebView2 用户数据目录固定到 %LOCALAPPDATA%\DshGUI\WebView2，
+            // 避免默认在 exe 旁生成「DshGUI.exe.WebView2」文件夹（如 exe 在桌面则会出现在桌面）。
+            WebView.CreationProperties = new CoreWebView2CreationProperties
+            {
+                UserDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "DshGUI", "WebView2"),
+            };
+
             _viewModel = viewModel;
             _settings = settings;
             _dsh = dsh;
