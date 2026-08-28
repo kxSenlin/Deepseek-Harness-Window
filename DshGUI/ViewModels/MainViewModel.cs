@@ -48,6 +48,7 @@ public sealed class MainViewModel : ViewModelBase
     private bool _healthChecking;
     private bool _updateInProgress;
     private bool _profileSwitching;
+    private bool _startupRunning;
     private DateTime _elapsedStart;
     private SettingsViewModel? _settingsViewModel;
     private ToastWindow? _approvalToast;
@@ -467,29 +468,41 @@ public sealed class MainViewModel : ViewModelBase
     /// <summary>启动流程：检查/安装/启动 dsh，成功后请求视图导航。</summary>
     public async Task RunStartupFlowAsync()
     {
-        StopHealthChecking();
-        NavigationResetRequested?.Invoke();
-        ShowLoading("正在检查 DeepSeek Harness…", showLog: false);
-
-        if (await _dsh.IsServerUpAsync())
-        {
-            NavigateRequested?.Invoke();
+        // 防重入：静默自启的后台启动与打开窗口 OnLoaded 会并发触发两次启动流程；若 dsh 尚未监听端口，
+        // 第二次会再拉起一个 dsh 争抢同一端口 → EADDRINUSE。启动流程进行中忽略后续调用。
+        if (_startupRunning)
             return;
-        }
-
-        if (!DshService.IsNodeInstalled() || !DshService.IsNpmInstalled())
+        _startupRunning = true;
+        try
         {
-            ShowNoNode();
-            return;
-        }
+            StopHealthChecking();
+            NavigationResetRequested?.Invoke();
+            ShowLoading("正在检查 DeepSeek Harness…", showLog: false);
 
-        if (!DshService.IsInstalled())
+            if (await _dsh.IsServerUpAsync())
+            {
+                NavigateRequested?.Invoke();
+                return;
+            }
+
+            if (!DshService.IsNodeInstalled() || !DshService.IsNpmInstalled())
+            {
+                ShowNoNode();
+                return;
+            }
+
+            if (!DshService.IsInstalled())
+            {
+                ShowNotInstalled();
+                return;
+            }
+
+            await StartDshAndWaitAsync();
+        }
+        finally
         {
-            ShowNotInstalled();
-            return;
+            _startupRunning = false;
         }
-
-        await StartDshAndWaitAsync();
     }
 
     private async void InstallDshAsync()

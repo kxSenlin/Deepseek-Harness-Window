@@ -138,6 +138,7 @@ namespace DshGUI.Views
         private bool _pendingPageLoad;
         private bool _navigateWhenShown;
         private bool _navigationRetried;
+        private bool _navigating;
 
         private IntPtr _hwnd;
         private CoreWebView2? _wiredCore;
@@ -362,34 +363,47 @@ namespace DshGUI.Views
                 return;
             }
 
-            // 新导航请求优先于旧导航：取消尚未完成的页面加载，避免旧 NavigationCompleted 干扰。
-            if (_pendingPageLoad)
-                CancelPendingPageLoad();
-
-            // 鉴权统一入口：0.1.2+ 需要一次性令牌（自启解析 / 外部粘贴），0.1.1 直接通过。
-            if (!await _viewModel.EnsureAuthTokenAsync())
+            // 防重入：窗口显示时 OnContentRendered 与 OnLoaded 的启动流程会并发触发导航，第一次可能
+            // 仍在 await 初始化 WebView2（此时 _pendingPageLoad 尚未置位）。锁必须在任何 await 之前置位，
+            // 否则会发出两个 Navigate 竞争 → ConnectionAborted（表现为“首次必失败，重试才进”）。
+            if (_navigating)
                 return;
-
-            _viewModel.StartHealthChecking();
-            _pendingPageLoad = true;
-            _navigationRetried = false;
-            _pageLoadTimer.Stop();
-            _pageLoadTimer.Start();
-
-            // dsh 端口刚响应不代表页面已渲染：创建 WebView2、保持加载面板，
-            // 等 NavigationCompleted 再切到 WebView，避免出现「空 WebView2 / 白屏」。
-            LogWebView($"Navigate 开始 IsVisible={IsVisible} IsLoaded={IsLoaded} WebViewVisible={WebView.Visibility}");
-            _viewModel.ShowLoading("正在加载 DeepSeek Harness 界面…", showLog: false);
-            if (!await EnsureWebViewReadyAsync())
+            _navigating = true;
+            try
             {
-                _pendingPageLoad = false;
-                _pageLoadTimer.Stop();
-                _viewModel.ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。");
-                return;
-            }
+                // 新导航请求优先于旧导航：取消尚未完成的页面加载，避免旧 NavigationCompleted 干扰。
+                if (_pendingPageLoad)
+                    CancelPendingPageLoad();
 
-            LogWebView($"开始导航 {_viewModel.NavigateUrl} CoreWebView2={(WebView.CoreWebView2 != null ? "ok" : "null")}");
-            WebView.CoreWebView2?.Navigate(_viewModel.NavigateUrl);
+                // 鉴权统一入口：0.1.2+ 需要一次性令牌（自启解析 / 外部粘贴），0.1.1 直接通过。
+                if (!await _viewModel.EnsureAuthTokenAsync())
+                    return;
+
+                _viewModel.StartHealthChecking();
+                _pendingPageLoad = true;
+                _navigationRetried = false;
+                _pageLoadTimer.Stop();
+                _pageLoadTimer.Start();
+
+                // dsh 端口刚响应不代表页面已渲染：创建 WebView2、保持加载面板，
+                // 等 NavigationCompleted 再切到 WebView，避免出现「空 WebView2 / 白屏」。
+                LogWebView($"Navigate 开始 IsVisible={IsVisible} IsLoaded={IsLoaded} WebViewVisible={WebView.Visibility}");
+                _viewModel.ShowLoading("正在加载 DeepSeek Harness 界面…", showLog: false);
+                if (!await EnsureWebViewReadyAsync())
+                {
+                    _pendingPageLoad = false;
+                    _pageLoadTimer.Stop();
+                    _viewModel.ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。");
+                    return;
+                }
+
+                LogWebView($"开始导航 {_viewModel.NavigateUrl} CoreWebView2={(WebView.CoreWebView2 != null ? "ok" : "null")}");
+                WebView.CoreWebView2?.Navigate(_viewModel.NavigateUrl);
+            }
+            finally
+            {
+                _navigating = false;
+            }
         }
 
         private void OnContentRendered(object? sender, EventArgs e)
