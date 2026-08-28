@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 
 namespace DshGUI.Services;
 
@@ -24,6 +26,21 @@ public sealed class DshService
     public int Port { get; private set; }
 
     public string Url => $"http://127.0.0.1:{Port}";
+
+    /// <summary>启动的 dsh profile（dsh --profile &lt;名字&gt;，默认 web）。</summary>
+    public string Profile { get; set; } = "web";
+
+    /// <summary>0.1.2+ 的访问令牌（从 dsh stdout 的 URL 行解析，或外部 dsh 由用户粘贴）。0.1.1 无令牌为 null。</summary>
+    public string? AccessToken { get; private set; }
+
+    /// <summary>页面导航地址：带令牌（0.1.2+）或裸根路径（0.1.1）。</summary>
+    public string NavigateUrl => AccessToken == null ? Url + "/" : Url + "/?token=" + AccessToken;
+
+    /// <summary>外部 dsh 场景：由用户粘贴启动地址后注入令牌。</summary>
+    public void SetExternalToken(string token) => AccessToken = token;
+
+    /// <summary>切换 profile / 重连时清除缓存的令牌。</summary>
+    public void ClearAccessToken() => AccessToken = null;
 
     private static readonly HashSet<int> BlockedServicePorts =
     [
@@ -107,99 +124,31 @@ public sealed class DshService
         IsManagedProcessRunning || await IsPortListeningOnPortAsync(Port) || await IsServerUpAsync();
 
     /// <summary>
-    /// 停止运行中的 DeepSeek Harness：先停 DshGUI 拉起的进程树；
-    /// 若配置端口仍被外部 dsh 占用，则定位监听该端口的 node 进程并结束其进程树。
+    /// 只停止 DshGUI 自己启动的 dsh 实例；外部实例（用户手动启动）不干预。
     /// </summary>
     public async Task<bool> StopRunningDshAsync(IProgress<string>? log = null)
     {
-        if (IsManagedProcessRunning)
+        if (!IsManagedProcessRunning)
         {
-            log?.Report("停止 DshGUI 启动的 dsh 进程树…");
-            Stop();
-        }
-        else if (await IsRunningAsync())
-        {
-            log?.Report($"检测到外部 dsh 实例占用 {Port} 端口");
+            log?.Report("当前 dsh 不是由 DshGUI 启动的（外部实例），DshGUI 不停止它。");
+            return false;
         }
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (DateTime.UtcNow < deadline && await IsRunningAsync())
-        {
-            var pid = await FindProcessIdListeningOnPortAsync(Port);
-            if (pid == null)
-                break;
+        log?.Report("停止 DshGUI 启动的 dsh 进程树…");
+        Stop();
 
-            try
-            {
-                using var process = Process.GetProcessById(pid.Value);
-                var name = process.ProcessName;
-                if (!name.StartsWith("node", StringComparison.OrdinalIgnoreCase)
-                    && !name.StartsWith("dsh", StringComparison.OrdinalIgnoreCase))
-                {
-                    log?.Report($"端口 {Port} 由非 dsh 进程占用（{name}），拒绝结束：{pid}");
-                    return false;
-                }
+        // 等端口真正释放（最多 5 秒），避免旧进程未退净导致后续连接旧实例。
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline && await IsPortListeningOnPortAsync(Port))
+            await Task.Delay(200);
 
-                log?.Report($"结束占用 {Port} 端口的 dsh 进程：{name} ({pid})");
-                process.Kill(entireProcessTree: true);
-                await Task.Delay(500);
-            }
-            catch (Exception ex)
-            {
-                log?.Report("结束外部 dsh 进程失败：" + ex.Message);
-                return false;
-            }
-        }
-
-        return !await IsRunningAsync();
-    }
-
-    /// <summary>通过 netstat -ano 查找监听指定 TCP 端口的进程 id。</summary>
-    public static async Task<int?> FindProcessIdListeningOnPortAsync(int port)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "netstat.exe",
-            Arguments = "-ano -p tcp",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-
-        try
-        {
-            using var process = new Process { StartInfo = psi };
-            if (!process.Start())
-                return null;
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            var suffix = ":" + port + " ";
-            foreach (var line in output.Split('\n'))
-            {
-                if (!line.Contains("LISTENING", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                if (!line.Contains(suffix, StringComparison.Ordinal))
-                    continue;
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 5 && int.TryParse(parts[^1], out var pid))
-                    return pid;
-            }
-        }
-        catch
-        {
-            // netstat 不可用时无法定位外部进程。
-        }
-
-        return null;
+        return !await IsPortListeningOnPortAsync(Port);
     }
 
     public async Task<bool> InstallAsync(string registry, IProgress<string>? progress = null, string? distTag = null)
     {
         var package = string.IsNullOrWhiteSpace(distTag) ? "@deepseek-ai/dsh" : $"@deepseek-ai/dsh@{distTag}";
-        if (distTag != null && !distTag.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_'))
+        if (distTag != null && !distTag.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or '+'))
             return false;
 
         var psi = new ProcessStartInfo
@@ -242,8 +191,8 @@ public sealed class DshService
     {
         var dsh = DshPaths.FindOnPath("dsh");
         var commandLine = dsh != null
-            ? $"\"{dsh}\" web --port {Port} --no-open"
-            : $"npx --registry {registry} @deepseek-ai/dsh web --port {Port} --no-open";
+            ? $"\"{dsh}\" --profile {Profile} --port {Port} --no-open"
+            : $"npx --registry {registry} @deepseek-ai/dsh --profile {Profile} --port {Port} --no-open";
 
         var psi = new ProcessStartInfo
         {
@@ -277,7 +226,36 @@ public sealed class DshService
         {
             AppendLog(line);
             if (line != null)
+            {
                 progress?.Report(line);
+                TryCaptureToken(line);
+            }
+        }
+    }
+
+    // 0.1.2+ 启动时打印：dsh web: http://127.0.0.1:3080/?token=XXX (LAN: ...)
+    private static readonly Regex TokenPattern = new(@"[?&]token=([A-Za-z0-9_-]{8,})", RegexOptions.Compiled);
+
+    private void TryCaptureToken(string line)
+    {
+        if (AccessToken != null)
+            return;
+        var match = TokenPattern.Match(line);
+        if (match.Success)
+            AccessToken = match.Groups[1].Value;
+    }
+
+    /// <summary>新版本 dsh（0.1.2+）对无令牌的 GET / 返回 401，0.1.1 直接 200。</summary>
+    public async Task<bool> IsAuthRequiredAsync()
+    {
+        try
+        {
+            using var response = await Http.GetAsync(_dshUri);
+            return response.StatusCode == HttpStatusCode.Unauthorized;
+        }
+        catch
+        {
+            return false;
         }
     }
 

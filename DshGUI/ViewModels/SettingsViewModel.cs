@@ -34,6 +34,8 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _updateStatusText = "";
     private bool _canUpdateLatest;
     private bool _canUpdatePreview;
+    private string[] _availableVersions = [];
+    private string? _selectedVersion;
 
     public SettingsViewModel(SettingsService settings, DshService dsh)
     {
@@ -52,9 +54,15 @@ public sealed class SettingsViewModel : ViewModelBase
         SaveCommand = new RelayCommand(_ => SaveAsync());
         CancelCommand = new RelayCommand(_ => RequestClose?.Invoke());
         StopDshCommand = new RelayCommand(_ => StopDshAsync());
+        RestartDshCommand = new RelayCommand(_ => RestartAsync());
         CheckUpdateCommand = new RelayCommand(_ => _ = CheckUpdateAsync());
         UpdateLatestCommand = new RelayCommand(_ => UpdateRequested?.Invoke("latest"));
         UpdatePreviewCommand = new RelayCommand(_ => UpdateRequested?.Invoke("next"));
+        UpdateSelectedCommand = new RelayCommand(_ =>
+        {
+            if (!string.IsNullOrWhiteSpace(SelectedVersion))
+                UpdateRequested?.Invoke(SelectedVersion);
+        });
 
         InstalledVersionText = $"当前版本：{UpdateService.GetInstalledVersion() ?? "未知"}";
         UpdateStatusText = "点击「检查更新」获取最新版本";
@@ -116,6 +124,8 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public ICommand StopDshCommand { get; }
 
+    public ICommand RestartDshCommand { get; }
+
     public string StopDshStatus
     {
         get => _stopDshStatus;
@@ -146,11 +156,26 @@ public sealed class SettingsViewModel : ViewModelBase
         private set => SetProperty(ref _canUpdatePreview, value);
     }
 
+    /// <summary>npm 上已发布的所有版本（最新在前），供用户自行挑选。</summary>
+    public string[] AvailableVersions
+    {
+        get => _availableVersions;
+        private set => SetProperty(ref _availableVersions, value);
+    }
+
+    public string? SelectedVersion
+    {
+        get => _selectedVersion;
+        set => SetProperty(ref _selectedVersion, value);
+    }
+
     public ICommand CheckUpdateCommand { get; }
 
     public ICommand UpdateLatestCommand { get; }
 
     public ICommand UpdatePreviewCommand { get; }
+
+    public ICommand UpdateSelectedCommand { get; }
 
     public event Action? RequestClose;
 
@@ -158,6 +183,9 @@ public sealed class SettingsViewModel : ViewModelBase
     public event Action<string>? UpdateRequested;
 
     public event Action? SettingsChanged;
+
+    /// <summary>请求 MainWindow 按当前设置（含端口）重启 dsh。</summary>
+    public event Action? RestartRequested;
 
     public void SetHotkey(int modifiers, int key)
     {
@@ -180,7 +208,7 @@ public sealed class SettingsViewModel : ViewModelBase
             var stopped = await _dsh.StopRunningDshAsync();
             StopDshStatus = stopped
                 ? "DeepSeek Harness 已关闭。"
-                : "关闭失败：端口仍被其他程序占用，请检查后重试。";
+                : "未停止：dsh 不是由 DshGUI 启动的（外部实例），DshGUI 只停止自己启动的实例。";
         }
         catch (Exception ex)
         {
@@ -190,17 +218,33 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private async void SaveAsync()
     {
+        if (!await ApplyAndSaveAsync())
+            return;
+        SettingsChanged?.Invoke();
+        RequestClose?.Invoke();
+    }
+
+    private async void RestartAsync()
+    {
+        if (!await ApplyAndSaveAsync())
+            return;
+        RestartRequested?.Invoke();
+    }
+
+    /// <summary>校验并应用设置面板的全部值（端口校验/占用提醒/保存/自启）；用户取消时返回 false。</summary>
+    private async Task<bool> ApplyAndSaveAsync()
+    {
         if (!int.TryParse(_dshPortText.Trim(), out var port))
         {
             NoticeCallback?.Invoke("端口无效", "dsh 端口必须是 1-65535 之间的数字。");
-            return;
+            return false;
         }
 
         var portError = DshService.GetPortError(port);
         if (portError != null)
         {
             NoticeCallback?.Invoke("端口不安全", portError);
-            return;
+            return false;
         }
 
         // 只有端口发生变化且已被占用时才提醒，避免每次保存当前端口都弹窗。
@@ -209,7 +253,7 @@ public sealed class SettingsViewModel : ViewModelBase
         {
             var confirmed = PortOccupiedCallback?.Invoke(port) ?? false;
             if (!confirmed)
-                return;
+                return false;
         }
 
         _settings.Settings.Theme = (ThemePreference)_themeIndex;
@@ -227,9 +271,7 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(DshPortText));
 
         AutoStartService.SetEnabled(_autoStart);
-
-        SettingsChanged?.Invoke();
-        RequestClose?.Invoke();
+        return true;
     }
 
     private async Task CheckUpdateAsync()
@@ -237,6 +279,8 @@ public sealed class SettingsViewModel : ViewModelBase
         UpdateStatusText = "正在检查更新…";
         CanUpdateLatest = false;
         CanUpdatePreview = false;
+        AvailableVersions = [];
+        SelectedVersion = null;
 
         try
         {
@@ -245,21 +289,31 @@ public sealed class SettingsViewModel : ViewModelBase
                 ? "当前版本：未知"
                 : $"当前版本：{installed}";
 
-            var (latest, preview) = await _update.GetAvailableVersionsAsync(_settings.Settings.NpmRegistry);
-            var latestNewer = UpdateService.IsNewer(latest, installed);
-            var previewNewer = UpdateService.IsNewer(preview, installed);
+            var (latest, preview, versions) = await _update.GetAvailableVersionsAsync(_settings.Settings.NpmRegistry);
+            AvailableVersions = versions;
+
+            // 无法确定已装版本时，不能据此判定「没有更新」：只要 registry 返回了版本就按可更新展示，
+            // 否则会出现「查到了新版本但界面显示已是最新」的硬性吞更新问题。
+            var installedKnown = !string.IsNullOrEmpty(installed);
+            var latestNewer = installedKnown
+                ? UpdateService.IsNewer(latest, installed)
+                : !string.IsNullOrEmpty(latest);
+            var previewNewer = installedKnown
+                ? UpdateService.IsNewer(preview, installed)
+                : !string.IsNullOrEmpty(preview);
+            var unknownSuffix = installedKnown ? "" : "（当前版本未知）";
 
             CanUpdateLatest = latestNewer;
             CanUpdatePreview = previewNewer;
 
             if (latestNewer && previewNewer)
-                UpdateStatusText = $"发现新版本 {latest}，另有预览版 {preview}";
+                UpdateStatusText = $"发现新版本 {latest}，另有预览版 {preview}{unknownSuffix}";
             else if (latestNewer)
-                UpdateStatusText = IsPrerelease(latest)
+                UpdateStatusText = (IsPrerelease(latest)
                     ? $"发现新版本 {latest}（预发布版）"
-                    : $"发现新版本 {latest}";
+                    : $"发现新版本 {latest}") + unknownSuffix;
             else if (previewNewer)
-                UpdateStatusText = $"发现预览版 {preview}（预发布版），当前 {installed ?? "未知"}";
+                UpdateStatusText = $"发现预览版 {preview}（预发布版）{unknownSuffix}";
             else if (latest == null && preview == null)
                 UpdateStatusText = "检查失败：无法连接 npm registry，请稍后重试。";
             else

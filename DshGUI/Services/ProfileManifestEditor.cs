@@ -42,12 +42,6 @@ public sealed class ProfileManifestEditor
 
     public bool HasBundle(string name) => BundleNames.Contains(name);
 
-    public void RemoveDependency(string name)
-    {
-        if (_root["dependencies"] is JsonObject deps)
-            deps.Remove(name);
-    }
-
     public void RemoveBundle(string name)
     {
         if (_root["dsh"] is not JsonObject dsh || dsh["profile"] is not JsonObject profile

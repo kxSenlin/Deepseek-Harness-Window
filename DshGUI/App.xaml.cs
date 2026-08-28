@@ -43,16 +43,13 @@ namespace DshGUI
             _theme = new ThemeService(_settings);
             _theme.ApplyTheme();
             _theme.StartSystemThemeWatcher();
-            _dsh = new DshService(_settings.Settings.DshPort);
+            _dsh = new DshService(_settings.Settings.DshPort) { Profile = _settings.Settings.Profile };
             _viewModel = new MainViewModel(_theme);
 
             _tray = new TrayService();
 
             var silent = e.Args.Contains("--autostart") && _settings.Settings.AutoStartSilent;
-            _mainWindow = new MainWindowView(_viewModel, _settings, _dsh, _theme, _tray)
-            {
-                StartSilent = silent,
-            };
+            _mainWindow = new MainWindowView(_viewModel, _settings, _dsh, _theme, _tray);
             MainWindow = _mainWindow;
             _tray.OpenRequested += () => _mainWindow.Dispatcher.Invoke(() => _viewModel.ShowMainWindow());
             _tray.PluginManagerRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.OpenPluginManager());
@@ -64,7 +61,16 @@ namespace DshGUI
 
             _singleInstance.Listen(() => _mainWindow.Dispatcher.Invoke(() => _viewModel.ShowMainWindow()));
 
-            _mainWindow.Show();
+            if (silent)
+            {
+                // 静默自启：窗口从不显示（无 Show/Hide、无开机闪现），后台直接跑启动流程。
+                // 创建隐藏 HWND 以便注册全局热键；WebView2/页面在窗口首次显示时才创建。
+                _mainWindow.RunStartupInBackground();
+            }
+            else
+            {
+                _mainWindow.Show();
+            }
         }
 
         protected override void OnExit(ExitEventArgs e)

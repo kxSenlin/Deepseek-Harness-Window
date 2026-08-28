@@ -17,6 +17,9 @@ public sealed class AppSettings
     /// <summary>dsh 监听端口，DshGUI 通过该端口连接并拉起 dsh。</summary>
     public int DshPort { get; set; } = 3080;
 
+    /// <summary>启动的 dsh profile（dsh --profile &lt;名字&gt;，默认 web）。</summary>
+    public string Profile { get; set; } = "web";
+
     /// <summary>agent 完成时弹通知（仅最小化/托盘时）。</summary>
     public bool NotifyOnComplete { get; set; } = true;
 

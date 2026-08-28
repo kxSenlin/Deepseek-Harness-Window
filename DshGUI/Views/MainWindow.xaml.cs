@@ -2,8 +2,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -148,7 +150,11 @@ namespace DshGUI.Views
 
         private readonly DispatcherTimer _elapsedTimer = new() { Interval = TimeSpan.FromSeconds(1) };
         private readonly DispatcherTimer _healthTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+        private readonly DispatcherTimer _pageLoadTimer = new() { Interval = TimeSpan.FromSeconds(20) };
         private bool _healthChecking;
+        private bool _pendingPageLoad;
+        private bool _navigateWhenShown;
+        private bool _navigationRetried;
         private DateTime _elapsedStart;
         private Action? _primaryAction;
         private Action? _secondaryAction;
@@ -162,9 +168,6 @@ namespace DshGUI.Views
         private IntPtr _hwnd;
         private bool _updateInProgress;
         private CoreWebView2? _wiredCore;
-
-        /// <summary>开机自启 + 静默模式：窗口不显示，只在托盘后台运行。</summary>
-        public bool StartSilent { get; set; }
 
         public MainWindow(MainViewModel viewModel, SettingsService settings, DshService dsh, ThemeService theme, TrayService tray)
         {
@@ -189,9 +192,18 @@ namespace DshGUI.Views
             TitleIcon.Source = IconHelper.GetAppIcon(16);
             _elapsedTimer.Tick += (_, _) => UpdateElapsed();
             _healthTimer.Tick += OnHealthTick;
+            _pageLoadTimer.Tick += (_, _) => OnPageLoadTimeout();
+            WebView.NavigationCompleted += OnNavigationCompleted;
+            ContentRendered += OnContentRendered;
             TaskbarItemInfo = new System.Windows.Shell.TaskbarItemInfo();
 
             _theme.ThemeChanged += () => _theme.ApplyToWebView(WebView.CoreWebView2);
+
+            var profiles = new List<string>(DshPaths.GetProfileNames());
+            if (!profiles.Contains(_settings.Settings.Profile, StringComparer.OrdinalIgnoreCase))
+                profiles.Insert(0, _settings.Settings.Profile);
+            ProfileSelector.ItemsSource = profiles;
+            ProfileSelector.SelectedItem = _settings.Settings.Profile;
 
             RestoreWindowState();
         }
@@ -322,22 +334,24 @@ namespace DshGUI.Views
             _settings.Save();
         }
 
-        private async void OnLoaded(object sender, RoutedEventArgs e)
+        private async void OnLoaded(object sender, RoutedEventArgs e) => await StartupAsync();
+
+        /// <summary>启动流程：加载面板 → 检查/启动 dsh → 跳转页面。</summary>
+        private async Task StartupAsync()
         {
-            if (StartSilent)
-            {
-                StartSilent = false;
-                Hide();
-            }
-
             ShowLoading("正在初始化…", showLog: false);
-            if (!await EnsureWebViewReadyAsync())
-            {
-                ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。");
-                return;
-            }
-
+            // WebView2 推迟到 Navigate() 时才创建：启动/等待阶段内容区保持纯 WPF 加载面板，
+            // 避免 WebView2 的 HWND 遮挡控制台，也避免打开窗口时看到空 WebView2。
             await RunStartupFlowAsync();
+        }
+
+        /// <summary>静默自启入口：窗口从不显示（无 Show/Hide、无开机闪现），后台直接跑启动流程。</summary>
+        public void RunStartupInBackground()
+        {
+            // 创建隐藏 HWND（触发 OnSourceInitialized：全局热键、DWM 样式），但不显示窗口；
+            // WebView2 与页面加载推迟到窗口首次显示（见 Navigate 的 IsVisible 守卫）时再进行。
+            _ = new WindowInteropHelper(this).EnsureHandle();
+            _ = StartupAsync();
         }
 
         // 初始化 / 重建 WebView2 控制器，并注入桥接脚本；可被重连流程复用。
@@ -348,8 +362,9 @@ namespace DshGUI.Views
                 WebView.DefaultBackgroundColor = _theme.WebViewBackgroundColor;
                 await WebView.EnsureCoreWebView2Async();
             }
-            catch
+            catch (Exception ex)
             {
+                LogWebView($"EnsureCoreWebView2Async 失败: {ex.GetType().Name}: {ex.Message}");
                 return false;
             }
 
@@ -357,7 +372,9 @@ namespace DshGUI.Views
             _viewModel.RefreshTheme();
 
             var core = WebView.CoreWebView2;
-            if (core != null && !ReferenceEquals(core, _wiredCore))
+            if (core == null)
+                LogWebView("EnsureCoreWebView2Async 完成但 CoreWebView2 为 null");
+            else if (!ReferenceEquals(core, _wiredCore))
             {
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
                 core.WebMessageReceived += OnWebMessageReceived;
@@ -455,6 +472,92 @@ namespace DshGUI.Views
             }
 
             Navigate();
+        }
+
+        /// <summary>
+        /// 确保已有访问令牌（0.1.2+ 需要）：DshGUI 自己启动的 dsh 从 stdout 解析；
+        /// 解析不到或外部启动的 dsh 则弹出粘贴框。0.1.1 无需令牌直接 true。
+        /// 只在 Navigate() 内调用——所有导航入口（启动/重连/切 profile/粘贴令牌后）统一走这里。
+        /// </summary>
+        private async Task<bool> EnsureAuthTokenAsync()
+        {
+            if (_dsh.AccessToken != null)
+                return true;
+            if (!await _dsh.IsAuthRequiredAsync())
+                return true;
+
+            if (_dsh.IsManagedProcessRunning)
+            {
+                var tokenDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+                while (_dsh.AccessToken == null && DateTime.UtcNow < tokenDeadline)
+                    await Task.Delay(100);
+                if (_dsh.AccessToken != null)
+                    return true;
+            }
+
+            ShowTokenInput();
+            return false;
+        }
+
+        private void ShowTokenInput()
+        {
+            StopElapsed();
+            StatusText.Text = "此版本 dsh 需要访问令牌";
+            InstallProgress.Visibility = Visibility.Collapsed;
+            LogContainer.Visibility = Visibility.Collapsed;
+            MirrorSelector.Visibility = Visibility.Collapsed;
+            ActionButtons.Visibility = Visibility.Collapsed;
+            TokenUrlBox.Text = "";
+            TokenInputPanel.Visibility = Visibility.Visible;
+        }
+
+        private void OnTokenConnectClick(object sender, RoutedEventArgs e)
+        {
+            var match = Regex.Match(TokenUrlBox.Text?.Trim() ?? "", @"[?&]token=([A-Za-z0-9_-]{8,})");
+            if (!match.Success)
+            {
+                System.Windows.MessageBox.Show(this, "地址里没有找到令牌，请粘贴 dsh 启动时打印的完整地址（含 ?token=…）。",
+                    "无法连接", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _dsh.SetExternalToken(match.Groups[1].Value);
+            TokenInputPanel.Visibility = Visibility.Collapsed;
+            Navigate();
+        }
+
+        private bool _profileSwitching;
+
+        private async void OnProfileSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_profileSwitching || ProfileSelector.SelectedItem is not string profile)
+                return;
+            if (string.Equals(profile, _settings.Settings.Profile, StringComparison.Ordinal))
+                return;
+
+            _profileSwitching = true;
+            try
+            {
+                _settings.Settings.Profile = profile;
+                _settings.Save();
+                _dsh.Profile = profile;
+                await SwitchProfileAsync();
+            }
+            finally
+            {
+                _profileSwitching = false;
+            }
+        }
+
+        private async Task SwitchProfileAsync()
+        {
+            _healthTimer.Stop();
+            CancelPendingPageLoad();
+            _dsh.Stop();
+            _dsh.ClearAccessToken();
+            WebView.Visibility = Visibility.Collapsed;
+            LoadingPanel.Visibility = Visibility.Visible;
+            await RunStartupFlowAsync();
         }
 
         private void ShowLoading(string message, bool showLog, bool clearLog = true)
@@ -619,13 +722,130 @@ namespace DshGUI.Views
             InstallLog.ScrollToEnd();
         }
 
-        private void Navigate()
+        private async void Navigate()
         {
+            // 窗口未显示（如静默自启）时推迟加载页面：等窗口首次显示（IsVisibleChanged）再执行，
+            // 避免在隐藏/未布局状态下创建 WebView2，也保证打开窗口时看到的是加载面板而非空白。
+            if (!IsVisible)
+            {
+                _navigateWhenShown = true;
+                return;
+            }
+
+            // 已有页面在加载：直接忽略，避免二次导航打断首次导航（WebView2 报 ConnectionAborted）。
+            if (_pendingPageLoad)
+                return;
+
+            // 鉴权统一入口：0.1.2+ 需要一次性令牌（自启解析 / 外部粘贴），0.1.1 直接通过。
+            if (!await EnsureAuthTokenAsync())
+                return;
+
+            _healthTimer.Start();
+            _pendingPageLoad = true;
+            _navigationRetried = false;
+            _pageLoadTimer.Stop();
+            _pageLoadTimer.Start();
+
+            // dsh 端口刚响应不代表页面已渲染：创建 WebView2、保持加载面板，
+            // 等 NavigationCompleted 再切到 WebView，避免出现「空 WebView2 / 白屏」。
+            LogWebView($"Navigate 开始 IsVisible={IsVisible} IsLoaded={IsLoaded} WebViewVisible={WebView.Visibility}");
+            ShowLoading("正在加载 DeepSeek Harness 界面…", showLog: false);
+            if (!await EnsureWebViewReadyAsync())
+            {
+                _pendingPageLoad = false;
+                _pageLoadTimer.Stop();
+                ShowFatal("WebView2 运行时不可用，请先安装 Microsoft Edge WebView2 Runtime。");
+                return;
+            }
+
+            LogWebView($"开始导航 {_dsh.NavigateUrl} CoreWebView2={(WebView.CoreWebView2 != null ? "ok" : "null")}");
+            WebView.CoreWebView2?.Navigate(_dsh.NavigateUrl);
+        }
+
+        private void OnContentRendered(object? sender, EventArgs e)
+        {
+            // 窗口首次渲染完成（含静默自启后首次托盘打开）：若有待执行的导航则执行。
+            // 单个持久订阅 + 一次性标记：无论 IsVisibleChanged / ContentRendered 触发多少次，
+            // 每次待导航只会执行一次，从根本上杜绝二次导航打断首次导航（ConnectionAborted）。
+            if (_navigateWhenShown)
+            {
+                _navigateWhenShown = false;
+                Navigate();
+            }
+        }
+
+        private async void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (!_pendingPageLoad)
+                return;
+
+            _pendingPageLoad = false;
+            _pageLoadTimer.Stop();
+
+            if (e.IsSuccess)
+            {
+                StopElapsed();
+                LoadingPanel.Visibility = Visibility.Collapsed;
+                WebView.Visibility = Visibility.Visible;
+            }
+            else if (!_navigationRetried)
+            {
+                // 首次加载失败多为 WebView2 冷启动/窗口刚渲染的竞态：自动重试一次，避免直接弹失败提示。
+                _navigationRetried = true;
+                LogWebView($"页面加载失败(首次，将重试) WebErrorStatus={e.WebErrorStatus} URL={_dsh.Url}");
+                ShowLoading("页面加载失败，正在重试…", showLog: false);
+                _pendingPageLoad = true;
+                WebView.CoreWebView2?.Navigate(_dsh.NavigateUrl);
+                _pageLoadTimer.Stop();
+                _pageLoadTimer.Start();
+            }
+            else
+            {
+                LogWebView($"页面加载失败(重试后仍失败) WebErrorStatus={e.WebErrorStatus} URL={_dsh.Url}");
+                // 鉴权被拒且没有令牌：引导用户粘贴启动地址，而不是停在「页面加载失败」。
+                if (_dsh.AccessToken == null && await _dsh.IsAuthRequiredAsync())
+                {
+                    ShowTokenInput();
+                    return;
+                }
+                ShowFailed("页面加载失败，请检查 dsh 服务后重试。", "重试", RetryAsync);
+            }
+        }
+
+        /// <summary>把 WebView2 关键节点写入 %LOCALAPPDATA%\DshGUI\webview.log，便于定位加载失败。</summary>
+        private void LogWebView(string message)
+        {
+            try
+            {
+                var path = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "DshGUI", "webview.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+            }
+            catch
+            {
+                // 日志写失败不影响运行。
+            }
+        }
+
+        private void OnPageLoadTimeout()
+        {
+            if (!_pendingPageLoad)
+                return;
+
+            // 页面迟迟未完成导航（如服务挂起）：不再让用户干等，直接显示 WebView，健康检查会接管。
+            _pendingPageLoad = false;
+            _pageLoadTimer.Stop();
             StopElapsed();
             LoadingPanel.Visibility = Visibility.Collapsed;
             WebView.Visibility = Visibility.Visible;
-            WebView.CoreWebView2?.Navigate(_dsh.Url + "/");
-            _healthTimer.Start();
+        }
+
+        private void CancelPendingPageLoad()
+        {
+            _pendingPageLoad = false;
+            _pageLoadTimer.Stop();
         }
 
         private async void RunUpdateAsync(string distTag)
@@ -649,15 +869,22 @@ namespace DshGUI.Views
         {
             // 更新前先停掉 dsh，再复用启动/安装面板显示 npm install 的完整日志和进度。
             _healthTimer.Stop();
+            CancelPendingPageLoad();
             _viewModel.ShowMainWindow();
             WebView.Visibility = Visibility.Collapsed;
-            ShowLoading($"正在更新 DeepSeek Harness（{(distTag == "latest" ? "最新版" : "预览版 " + distTag)}）…", showLog: true);
+            var updateLabel = distTag switch
+            {
+                "latest" => "最新版",
+                "next" => "预览版",
+                _ => "版本 " + distTag,
+            };
+            ShowLoading($"正在更新 DeepSeek Harness（{updateLabel}）…", showLog: true);
 
             AppendLogLine("—— 停止正在运行的 dsh ——");
             var stopped = await _dsh.StopRunningDshAsync(new Progress<string>(AppendLogLine));
             if (!stopped)
             {
-                ShowFailed("更新失败：无法停止当前运行的 dsh。请检查端口占用后重试。", "重试更新", () => RunUpdateAsync(distTag), "启动 dsh", RetryAsync);
+                ShowFailed("更新前需要停止 dsh，但当前 dsh 不是由 DshGUI 启动的（外部实例）或端口仍被占用。\n请手动停止后重试。", "重试更新", () => RunUpdateAsync(distTag), "启动 dsh", RetryAsync);
                 return;
             }
 
@@ -793,11 +1020,11 @@ namespace DshGUI.Views
         {
             _disconnectToast = null;
             _healthTimer.Stop();
+            CancelPendingPageLoad();
             WebView.Visibility = Visibility.Collapsed;
             LoadingPanel.Visibility = Visibility.Visible;
 
-            // 折叠可能重建 WebView2 控制器，重新确保后再跑启动流程。
-            await EnsureWebViewReadyAsync();
+            // WebView2 控制器由 Navigate() 在需要时创建/确保。
             await RunStartupFlowAsync();
         }
 
@@ -925,8 +1152,22 @@ namespace DshGUI.Views
             _settingsViewModel.RequestClose += CloseSettings;
             _settingsViewModel.SettingsChanged += OnSettingsChanged;
             _settingsViewModel.UpdateRequested += RunUpdateAsync;
+            _settingsViewModel.RestartRequested += OnRestartDshRequested;
             SettingsViewControl.DataContext = _settingsViewModel;
             SettingsViewControl.Visibility = Visibility.Visible;
+        }
+
+        private async void OnRestartDshRequested()
+        {
+            CloseSettings();
+            _healthTimer.Stop();
+            CancelPendingPageLoad();
+            _dsh.SetPort(_settings.Settings.DshPort);   // 应用设置面板里修改的端口
+            _dsh.Stop();                                // 只停 DshGUI 自己启动的实例
+            _dsh.ClearAccessToken();
+            WebView.Visibility = Visibility.Collapsed;
+            LoadingPanel.Visibility = Visibility.Visible;
+            await RunStartupFlowAsync();
         }
 
         private void CloseSettings()
@@ -936,6 +1177,7 @@ namespace DshGUI.Views
                 _settingsViewModel.RequestClose -= CloseSettings;
                 _settingsViewModel.SettingsChanged -= OnSettingsChanged;
                 _settingsViewModel.UpdateRequested -= RunUpdateAsync;
+                _settingsViewModel.RestartRequested -= OnRestartDshRequested;
                 _settingsViewModel = null;
             }
 
@@ -960,9 +1202,9 @@ namespace DshGUI.Views
             // 端口变更：更新 DshService，停止旧端口上的 dsh，并按新端口重启连接流程。
             _dsh.SetPort(_settings.Settings.DshPort);
             _dsh.Stop();
+            CancelPendingPageLoad();
             WebView.Visibility = Visibility.Collapsed;
             LoadingPanel.Visibility = Visibility.Visible;
-            await EnsureWebViewReadyAsync();
             await RunStartupFlowAsync();
         }
 

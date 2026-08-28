@@ -23,6 +23,30 @@ public static class DshPaths
 
     public static string ProfilesDirectory => Path.Combine(DshHome, "profiles");
 
+    /// <summary>枚举可用的 dsh profile 名（排除 node_modules 等非 profile 目录）；拿不到时兜底返回 web。</summary>
+    public static string[] GetProfileNames()
+    {
+        try
+        {
+            if (!Directory.Exists(ProfilesDirectory))
+                return ["web"];
+
+            var names = Directory.GetDirectories(ProfilesDirectory)
+                .Select(Path.GetFileName)
+                .Where(n => !string.IsNullOrWhiteSpace(n)
+                    && !n.Equals("node_modules", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Select(n => n!)
+                .ToArray();
+
+            return names.Length == 0 ? ["web"] : names;
+        }
+        catch
+        {
+            return ["web"];
+        }
+    }
+
     public static string ProfileDirectory(string profileName) =>
         Path.Combine(ProfilesDirectory, profileName);
 

@@ -32,11 +32,17 @@
 
             <TextBlock Text="dsh 进程" FontWeight="SemiBold" Margin="0,0,0,8" />
             <StackPanel Margin="0,0,0,16">
-                <Button Content="关闭 DeepSeek Harness"
-                        Width="200"
-                        HorizontalAlignment="Left"
-                        Style="{StaticResource DangerButtonStyle}"
-                        Command="{Binding StopDshCommand}" />
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="关闭dsh进程"
+                            Width="120"
+                            Style="{StaticResource DangerButtonStyle}"
+                            Command="{Binding StopDshCommand}" />
+                    <Button Content="重启dsh进程"
+                            Width="120"
+                            Margin="8,0,0,0"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding RestartDshCommand}" />
+                </StackPanel>
                 <TextBlock Text="{Binding StopDshStatus}"
                            Margin="0,8,0,0"
                            TextWrapping="Wrap"
@@ -47,7 +53,7 @@
             <StackPanel Margin="0,0,0,16">
                 <TextBlock Text="{Binding InstalledVersionText}" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding UpdateStatusText}"
-                           Margin="0,6,0,0"
+                           Margin="0,6,0,6"
                            TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleTextBrush}" />
                 <Button Content="检查更新" Width="100" Height="28" HorizontalAlignment="Left"
@@ -60,6 +66,18 @@
                             IsEnabled="{Binding CanUpdatePreview}"
                             Command="{Binding UpdatePreviewCommand}" />
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <ComboBox Width="150" Height="28"
+                              ItemsSource="{Binding AvailableVersions}"
+                              SelectedItem="{Binding SelectedVersion}"
+                              ToolTip="npm 上已发布的所有版本（最新在前）" />
+                    <Button Content="更新到所选版本" Width="110" Height="28" Margin="8,0,0,0"
+                            Command="{Binding UpdateSelectedCommand}" />
+                </StackPanel>
+                <TextBlock Text="点击「检查更新」后可在此选择任意已发布版本安装（含未打 latest 标签的预览版）。"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SubtleTextBrush}" />
             </StackPanel>
 
             <TextBlock Text="主题" FontWeight="SemiBold" Margin="0,0,0,8" />

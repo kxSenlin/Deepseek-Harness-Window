@@ -11,12 +11,19 @@ public sealed class UpdateService
     /// 读取 npm dist-tags 中的 latest 与 next：
     /// latest 作为首选更新通道，next 作为可选预览版通道。
     /// </summary>
-    public async Task<(string? Latest, string? Preview)> GetAvailableVersionsAsync(string registry)
+    /// <summary>
+    /// 读取 npm 的 latest / next dist-tag 与全部已发布版本（按 semver 降序，最新在前）。
+    /// </summary>
+    public async Task<(string? Latest, string? Preview, string[] Versions)> GetAvailableVersionsAsync(string registry)
     {
         try
         {
             var url = registry.TrimEnd('/') + "/@deepseek-ai/dsh";
-            var json = await Http.GetStringAsync(url);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            // 只取精简 packument（corgi），避免下载完整元数据（体积大、慢、易超时）；
+            // 该格式同样包含 dist-tags 与完整版本列表。
+            request.Headers.Accept.ParseAdd("application/vnd.npm.install-v1+json");
+            var json = await (await Http.SendAsync(request)).Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
 
             string? latest = null;
@@ -30,11 +37,33 @@ public sealed class UpdateService
                     preview = nextElement.GetString();
             }
 
-            return (latest, preview);
+            var versions = new List<string>();
+            if (doc.RootElement.TryGetProperty("versions", out var versionsElement)
+                && versionsElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var version in versionsElement.EnumerateObject())
+                    versions.Add(version.Name);
+            }
+
+            // 按 semver 降序（最新在前），解析失败的排到最后。
+            versions.Sort((a, b) =>
+            {
+                var va = ParseVersion(a);
+                var vb = ParseVersion(b);
+                if (va == null && vb == null)
+                    return string.CompareOrdinal(a, b);
+                if (va == null)
+                    return 1;
+                if (vb == null)
+                    return -1;
+                return vb.CompareTo(va);
+            });
+
+            return (latest, preview, versions.ToArray());
         }
         catch
         {
-            return (null, null);
+            return (null, null, []);
         }
     }
 
@@ -85,6 +114,12 @@ public sealed class UpdateService
             return null;
 
         text = text.Trim();
+
+        // 兼容官方 monorepo 的 release tag 命名（dsh-v0.1.2-alpha.1 / dsh-0.1.2）：
+        // 先剥掉 dsh- 前缀再按 semver 解析，否则会在第一个 '-' 处截断导致解析失败。
+        if (text.StartsWith("dsh-", StringComparison.OrdinalIgnoreCase))
+            text = text[4..];
+
         if (text.StartsWith('v') || text.StartsWith('V'))
             text = text[1..];
 

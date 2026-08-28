@@ -52,6 +52,15 @@
                                    FontSize="13"
                                    Foreground="{DynamicResource AppForegroundBrush}"
                                    Text="{Binding WindowTitle}" />
+                        <ComboBox x:Name="ProfileSelector"
+                                  Width="92"
+                                  Height="24"
+                                  Margin="10,0,0,0"
+                                  VerticalAlignment="Center"
+                                  FontSize="12"
+                                  ToolTip="切换 dsh profile（切换会重启 dsh）"
+                                  shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                                  SelectionChanged="OnProfileSelectionChanged" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -237,6 +246,24 @@
                                              Content="国内镜像（npmmirror）"
                                              VerticalAlignment="Center"
                                              Foreground="{DynamicResource AppForegroundBrush}" />
+                            </StackPanel>
+
+                            <StackPanel x:Name="TokenInputPanel"
+                                        Grid.Row="5"
+                                        Margin="0,20,0,0"
+                                        HorizontalAlignment="Center"
+                                        Visibility="Collapsed">
+                                <TextBlock Text="此版本 dsh 需要访问令牌：请粘贴 dsh 启动时打印的完整地址（含 ?token=…）"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="520"
+                                           Foreground="{DynamicResource AppForegroundBrush}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0" HorizontalAlignment="Center">
+                                    <TextBox x:Name="TokenUrlBox" Width="400" Height="28" VerticalContentAlignment="Center" />
+                                    <Button x:Name="TokenConnectButton" Content="连接" Width="80" Height="28" Margin="8,0,0,0"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Click="OnTokenConnectClick" />
+                                </StackPanel>
                             </StackPanel>
 
                             <StackPanel x:Name="ActionButtons"
