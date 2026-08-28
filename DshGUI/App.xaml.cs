@@ -44,12 +44,11 @@ namespace DshGUI
             _theme.ApplyTheme();
             _theme.StartSystemThemeWatcher();
             _dsh = new DshService(_settings.Settings.DshPort) { Profile = _settings.Settings.Profile };
-            _viewModel = new MainViewModel(_theme);
-
             _tray = new TrayService();
+            _viewModel = new MainViewModel(_theme, _settings, _dsh, _tray, new NotificationService());
 
             var silent = e.Args.Contains("--autostart") && _settings.Settings.AutoStartSilent;
-            _mainWindow = new MainWindowView(_viewModel, _settings, _dsh, _theme, _tray);
+            _mainWindow = new MainWindowView(_viewModel, _settings, _theme);
             MainWindow = _mainWindow;
             _tray.OpenRequested += () => _mainWindow.Dispatcher.Invoke(() => _viewModel.ShowMainWindow());
             _tray.PluginManagerRequested += () => _mainWindow.Dispatcher.Invoke(() => _mainWindow.OpenPluginManager());

@@ -9,7 +9,8 @@
         xmlns:views="clr-namespace:DshGUI.Views"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel, IsDesignTimeCreatable=False}"
-        Title="DeepSeek Harness"
+        Title="{Binding WindowTitle, FallbackValue=DeepSeek Harness}"
+        Topmost="{Binding IsTopmost, Mode=TwoWay}"
         WindowStyle="None"
         ResizeMode="CanResize"
         MinWidth="800"
@@ -18,6 +19,10 @@
         StateChanged="OnStateChanged"
         Loaded="OnLoaded"
         Closing="OnClosing">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </Window.Resources>
 
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40"
@@ -51,7 +56,7 @@
                         <TextBlock VerticalAlignment="Center"
                                    FontSize="13"
                                    Foreground="{DynamicResource AppForegroundBrush}"
-                                   Text="{Binding WindowTitle}" />
+                                   Text="{Binding WindowTitle, FallbackValue=DeepSeek Harness}" />
                         <ComboBox x:Name="ProfileSelector"
                                   Width="92"
                                   Height="24"
@@ -60,11 +65,12 @@
                                   FontSize="12"
                                   ToolTip="切换 dsh profile（切换会重启 dsh）"
                                   shell:WindowChrome.IsHitTestVisibleInChrome="True"
-                                  SelectionChanged="OnProfileSelectionChanged" />
+                                  ItemsSource="{Binding Profiles}"
+                                  SelectedItem="{Binding SelectedProfile, Mode=TwoWay}" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Click="OnPinClick"
+                        <Button Command="{Binding ToggleTopmostCommand}"
                                 ToolTip="置顶"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True"
                                 Style="{StaticResource TitleBarButtonStyle}">
@@ -87,8 +93,7 @@
                                 </Path.Style>
                             </Path>
                         </Button>
-                        <Button x:Name="PluginManagerButton"
-                                Click="OnPluginManagerClick"
+                        <Button Command="{Binding PluginManagerCommand}"
                                 ToolTip="插件管理"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True"
                                 Style="{StaticResource TitleBarButtonStyle}">
@@ -101,8 +106,7 @@
                                 </Path.RenderTransform>
                             </Path>
                         </Button>
-                        <Button x:Name="SettingsButton"
-                                Click="OnSettingsClick"
+                        <Button Command="{Binding SettingsCommand}"
                                 ToolTip="DshGUI 设置"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True"
                                 Style="{StaticResource TitleBarButtonStyle}">
@@ -157,16 +161,20 @@
                 <!-- 设置抽屉（与 WebView 并排，避免 HwndHost 遮挡） -->
                 <views:SettingsView x:Name="SettingsViewControl"
                                     Grid.Column="0"
-                                    DataContext="{x:Null}"
-                                    Visibility="Collapsed" />
+                                    DataContext="{Binding SettingsViewModel}"
+                                    Visibility="{Binding DataContext.IsSettingsVisible, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
 
                 <!-- 主内容区 -->
                 <Grid Grid.Column="1">
                     <!-- WebView 在就绪前保持隐藏，避免 HwndHost 遮挡加载面板 -->
-                    <wv2:WebView2 x:Name="WebView" Margin="1,0,1,1" Visibility="Collapsed" />
+                    <wv2:WebView2 x:Name="WebView"
+                                  Margin="1,0,1,1"
+                                  Visibility="{Binding IsWebViewVisible, Converter={StaticResource BoolToVis}}" />
 
                     <!-- 启动 / 安装 / 状态面板 -->
-                    <Border x:Name="LoadingPanel" Background="{DynamicResource AppBackgroundBrush}">
+                    <Border x:Name="LoadingPanel"
+                            Background="{DynamicResource AppBackgroundBrush}"
+                            Visibility="{Binding IsLoadingVisible, Converter={StaticResource BoolToVis}}">
                         <Grid Margin="56,40">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -185,7 +193,8 @@
                                        Foreground="{DynamicResource AppForegroundBrush}"
                                        HorizontalAlignment="Center"
                                        TextAlignment="Center"
-                                       TextWrapping="Wrap" />
+                                       TextWrapping="Wrap"
+                                       Text="{Binding StatusText, FallbackValue=正在初始化…}" />
 
                             <ProgressBar x:Name="InstallProgress"
                                          Grid.Row="1"
@@ -194,14 +203,15 @@
                                          Margin="0,24,0,0"
                                          HorizontalAlignment="Center"
                                          IsIndeterminate="True"
-                                         Visibility="Collapsed" />
+                                         Visibility="{Binding IsProgressVisible, Converter={StaticResource BoolToVis}}" />
 
                             <TextBlock x:Name="ElapsedText"
                                        Grid.Row="2"
                                        Margin="0,12,0,0"
                                        FontSize="13"
                                        Foreground="{DynamicResource SubtleTextBrush}"
-                                       HorizontalAlignment="Center" />
+                                       HorizontalAlignment="Center"
+                                       Text="{Binding ElapsedText, FallbackValue=已用 0 秒}" />
 
                             <Border x:Name="LogContainer"
                                     Grid.Row="3"
@@ -210,7 +220,8 @@
                                     Background="#11000000"
                                     BorderBrush="#22000000"
                                     BorderThickness="1"
-                                    CornerRadius="6">
+                                    CornerRadius="6"
+                                    Visibility="{Binding IsLogVisible, Converter={StaticResource BoolToVis}}">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                                               HorizontalScrollBarVisibility="Auto"
                                               Padding="10,8">
@@ -221,7 +232,9 @@
                                              FontFamily="Consolas"
                                              FontSize="12"
                                              Foreground="{DynamicResource SubtleTextBrush}"
-                                             TextWrapping="NoWrap" />
+                                             TextWrapping="NoWrap"
+                                             Text="{Binding LogText, Mode=OneWay}"
+                                             TextChanged="OnInstallLogTextChanged" />
                                 </ScrollViewer>
                             </Border>
 
@@ -230,7 +243,7 @@
                                         Margin="0,20,0,0"
                                         Orientation="Horizontal"
                                         HorizontalAlignment="Center"
-                                        Visibility="Collapsed">
+                                        Visibility="{Binding IsMirrorSelectorVisible, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Text="镜像源："
                                            VerticalAlignment="Center"
                                            Margin="0,0,12,0"
@@ -240,29 +253,39 @@
                                              Content="官方源"
                                              VerticalAlignment="Center"
                                              Margin="0,0,16,0"
-                                             Foreground="{DynamicResource AppForegroundBrush}" />
+                                             Foreground="{DynamicResource AppForegroundBrush}"
+                                             IsChecked="{Binding IsOfficialMirrorChecked, Mode=TwoWay}" />
                                 <RadioButton x:Name="MirrorNpmmirror"
                                              GroupName="Mirror"
                                              Content="国内镜像（npmmirror）"
                                              VerticalAlignment="Center"
-                                             Foreground="{DynamicResource AppForegroundBrush}" />
+                                             Foreground="{DynamicResource AppForegroundBrush}"
+                                             IsChecked="{Binding IsNpmmirrorChecked, Mode=TwoWay}" />
                             </StackPanel>
 
                             <StackPanel x:Name="TokenInputPanel"
                                         Grid.Row="5"
                                         Margin="0,20,0,0"
                                         HorizontalAlignment="Center"
-                                        Visibility="Collapsed">
+                                        Visibility="{Binding IsTokenInputVisible, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Text="此版本 dsh 需要访问令牌：请粘贴 dsh 启动时打印的完整地址（含 ?token=…）"
                                            TextAlignment="Center"
                                            TextWrapping="Wrap"
                                            MaxWidth="520"
                                            Foreground="{DynamicResource AppForegroundBrush}" />
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0" HorizontalAlignment="Center">
-                                    <TextBox x:Name="TokenUrlBox" Width="400" Height="28" VerticalContentAlignment="Center" />
-                                    <Button x:Name="TokenConnectButton" Content="连接" Width="80" Height="28" Margin="8,0,0,0"
+                                    <TextBox x:Name="TokenUrlBox"
+                                             Width="400"
+                                             Height="28"
+                                             VerticalContentAlignment="Center"
+                                             Text="{Binding TokenUrl, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button x:Name="TokenConnectButton"
+                                            Content="连接"
+                                            Width="80"
+                                            Height="28"
+                                            Margin="8,0,0,0"
                                             Style="{StaticResource PrimaryButtonStyle}"
-                                            Click="OnTokenConnectClick" />
+                                            Command="{Binding TokenConnectCommand}" />
                                 </StackPanel>
                             </StackPanel>
 
@@ -271,19 +294,21 @@
                                         Margin="0,24,0,0"
                                         Orientation="Horizontal"
                                         HorizontalAlignment="Center"
-                                        Visibility="Collapsed">
+                                        Visibility="{Binding AreActionsVisible, Converter={StaticResource BoolToVis}}">
                                 <Button x:Name="PrimaryActionButton"
                                         MinWidth="128"
                                         Height="36"
                                         Style="{StaticResource PrimaryButtonStyle}"
-                                        Click="OnPrimaryActionClick" />
+                                        Content="{Binding PrimaryActionText, FallbackValue=重试}"
+                                        Command="{Binding PrimaryActionCommand}" />
                                 <Button x:Name="SecondaryActionButton"
                                         MinWidth="128"
                                         Height="36"
                                         Padding="20,0"
                                         Margin="12,0,0,0"
-                                        Click="OnSecondaryActionClick"
-                                        Visibility="Collapsed" />
+                                        Content="{Binding SecondaryActionText, FallbackValue=重试}"
+                                        Command="{Binding SecondaryActionCommand}"
+                                        Visibility="{Binding IsSecondaryActionVisible, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
                         </Grid>
                     </Border>
