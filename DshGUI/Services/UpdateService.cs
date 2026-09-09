@@ -67,6 +67,51 @@ public sealed class UpdateService
         }
     }
 
+    private const string GitHubReleasesUrl =
+        "https://api.github.com/repos/deepseek-ai/deepseek-harness/releases?per_page=100";
+
+    /// <summary>
+    /// 查询官方 GitHub Releases，返回其中按 semver 最新的一条 release tag（如 dsh-v0.1.3-alpha.1）。
+    /// 该通道与 npm 不总同步：上游可能先发 GitHub release，后发（甚至不发）npm。
+    /// 仅在「新 tag 比已装版本新且未发布到 npm」时由界面提示，不提供安装入口。
+    /// </summary>
+    public async Task<string?> GetGitHubLatestTagAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, GitHubReleasesUrl);
+            request.Headers.Accept.ParseAdd("application/vnd.github+json");
+            request.Headers.UserAgent.ParseAdd("DshGUI");
+            var json = await (await Http.SendAsync(request)).Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+                return null;
+
+            string? newest = null;
+            SemVer? newestVersion = null;
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (!item.TryGetProperty("tag_name", out var tag) || tag.ValueKind != JsonValueKind.String)
+                    continue;
+                var name = tag.GetString()!;
+                var version = ParseVersion(name);
+                if (version == null)
+                    continue;
+                if (newestVersion == null || version.CompareTo(newestVersion) > 0)
+                {
+                    newestVersion = version;
+                    newest = name;
+                }
+            }
+
+            return newest;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static string? GetInstalledVersion()
     {
         try
@@ -106,6 +151,28 @@ public sealed class UpdateService
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var legacy = Path.Combine(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "package.json");
         return File.Exists(legacy) ? legacy : null;
+    }
+
+    /// <summary>
+    /// 规整 GitHub release tag（如 dsh-v0.1.3-alpha.1）为与 npm 版本一致的字符串（0.1.3-alpha.1），
+    /// 供「该版本是否已在 npm 上发布」这一判断使用。
+    /// </summary>
+    public static string? NormalizeGitHubTag(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag))
+            return null;
+
+        var text = tag.Trim();
+        if (text.StartsWith("dsh-", StringComparison.OrdinalIgnoreCase))
+            text = text[4..];
+        if (text.StartsWith('v') || text.StartsWith('V'))
+            text = text[1..];
+
+        var plus = text.IndexOf('+');
+        if (plus >= 0)
+            text = text[..plus];
+
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
     private static SemVer? ParseVersion(string? text)

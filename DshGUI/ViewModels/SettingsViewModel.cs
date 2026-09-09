@@ -32,8 +32,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _stopDshStatus = "";
     private string _installedVersionText = "";
     private string _updateStatusText = "";
-    private bool _canUpdateLatest;
-    private bool _canUpdatePreview;
+    private string _githubHintText = "";
     private string[] _availableVersions = [];
     private string? _selectedVersion;
 
@@ -56,8 +55,6 @@ public sealed class SettingsViewModel : ViewModelBase
         StopDshCommand = new RelayCommand(_ => StopDshAsync());
         RestartDshCommand = new RelayCommand(_ => RestartAsync());
         CheckUpdateCommand = new RelayCommand(_ => _ = CheckUpdateAsync());
-        UpdateLatestCommand = new RelayCommand(_ => UpdateRequested?.Invoke("latest"));
-        UpdatePreviewCommand = new RelayCommand(_ => UpdateRequested?.Invoke("next"));
         UpdateSelectedCommand = new RelayCommand(_ =>
         {
             if (!string.IsNullOrWhiteSpace(SelectedVersion))
@@ -144,16 +141,11 @@ public sealed class SettingsViewModel : ViewModelBase
         private set => SetProperty(ref _updateStatusText, value);
     }
 
-    public bool CanUpdateLatest
+    /// <summary>上游 GitHub 已有但尚未发布到 npm 的新版本提示（只提示，不提供安装入口）。</summary>
+    public string GitHubHintText
     {
-        get => _canUpdateLatest;
-        private set => SetProperty(ref _canUpdateLatest, value);
-    }
-
-    public bool CanUpdatePreview
-    {
-        get => _canUpdatePreview;
-        private set => SetProperty(ref _canUpdatePreview, value);
+        get => _githubHintText;
+        private set => SetProperty(ref _githubHintText, value);
     }
 
     /// <summary>npm 上已发布的所有版本（最新在前），供用户自行挑选。</summary>
@@ -171,15 +163,11 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public ICommand CheckUpdateCommand { get; }
 
-    public ICommand UpdateLatestCommand { get; }
-
-    public ICommand UpdatePreviewCommand { get; }
-
     public ICommand UpdateSelectedCommand { get; }
 
     public event Action? RequestClose;
 
-    /// <summary>请求 MainWindow 执行更新；参数为 npm dist-tag（latest/next）。</summary>
+    /// <summary>请求 MainWindow 执行更新；参数为要安装的版本号或 dist-tag（如 latest / 0.1.2-rc.1）。</summary>
     public event Action<string>? UpdateRequested;
 
     public event Action? SettingsChanged;
@@ -277,10 +265,9 @@ public sealed class SettingsViewModel : ViewModelBase
     private async Task CheckUpdateAsync()
     {
         UpdateStatusText = "正在检查更新…";
-        CanUpdateLatest = false;
-        CanUpdatePreview = false;
         AvailableVersions = [];
         SelectedVersion = null;
+        GitHubHintText = "";
 
         try
         {
@@ -303,9 +290,6 @@ public sealed class SettingsViewModel : ViewModelBase
                 : !string.IsNullOrEmpty(preview);
             var unknownSuffix = installedKnown ? "" : "（当前版本未知）";
 
-            CanUpdateLatest = latestNewer;
-            CanUpdatePreview = previewNewer;
-
             if (latestNewer && previewNewer)
                 UpdateStatusText = $"发现新版本 {latest}，另有预览版 {preview}{unknownSuffix}";
             else if (latestNewer)
@@ -318,6 +302,24 @@ public sealed class SettingsViewModel : ViewModelBase
                 UpdateStatusText = "检查失败：无法连接 npm registry，请稍后重试。";
             else
                 UpdateStatusText = $"已是最新版本（当前 {installed ?? "未知"}）";
+
+            // 追加 GitHub 上游提示：官方可能先发 GitHub release、后发（甚至不发）npm，
+            // 导致「npm 看着已最新、GitHub 却已有新版本」的困惑。
+            // 仅在「该 tag 比已装版本新，且其版本未出现在 npm 已发布列表」时提示，避免与 npm 正常更新重复。
+            GitHubHintText = "";
+            var githubTag = await _update.GetGitHubLatestTagAsync();
+            if (!string.IsNullOrEmpty(githubTag))
+            {
+                var githubVersion = UpdateService.NormalizeGitHubTag(githubTag);
+                var githubNewer = string.IsNullOrEmpty(installed)
+                    || UpdateService.IsNewer(githubTag, installed);
+                // 该 tag 的版本是否已出现在 npm 已发布列表；在列表内则说明 npm 已同步，无需提示。
+                var onNpm = githubVersion != null && Array.IndexOf(versions, githubVersion) >= 0;
+                if (githubNewer && !onNpm)
+                {
+                    GitHubHintText = $"上游 GitHub 已有新版本 {githubTag}，但尚未发布到 npm。";
+                }
+            }
         }
         catch
         {

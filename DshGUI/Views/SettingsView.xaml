@@ -56,16 +56,23 @@
                            Margin="0,6,0,6"
                            TextWrapping="Wrap"
                            Foreground="{DynamicResource SubtleTextBrush}" />
+                <TextBlock Text="{Binding GitHubHintText}"
+                           Margin="0,0,0,6"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource AccentBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding GitHubHintText}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
                 <Button Content="检查更新" Width="100" Height="28" HorizontalAlignment="Left"
                         Command="{Binding CheckUpdateCommand}" />
-                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <Button Content="更新到最新版" Width="140" Height="28"
-                            IsEnabled="{Binding CanUpdateLatest}"
-                            Command="{Binding UpdateLatestCommand}" />
-                    <Button Content="更新到预览版" Width="140" Height="28" Margin="8,0,0,0"
-                            IsEnabled="{Binding CanUpdatePreview}"
-                            Command="{Binding UpdatePreviewCommand}" />
-                </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                     <ComboBox Width="150" Height="28"
                               ItemsSource="{Binding AvailableVersions}"

@@ -9,10 +9,7 @@ public sealed class DshService
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };
 
-    private static readonly string LogDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DshGUI");
-
-    public static string LogPath => Path.Combine(LogDirectory, "dsh.log");
+    public static string LogPath => DiagnosticLog.DshLogPath;
 
     private Process? _process;
     private Uri _dshUri = new("http://127.0.0.1:3080/");
@@ -277,21 +274,5 @@ public sealed class DshService
         _process = null;
     }
 
-    private static void AppendLog(string? line)
-    {
-        if (line == null)
-            return;
-
-        try
-        {
-            Directory.CreateDirectory(LogDirectory);
-            File.AppendAllText(
-                LogPath,
-                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + line + Environment.NewLine);
-        }
-        catch
-        {
-            // 日志写失败不影响运行。
-        }
-    }
+    private static void AppendLog(string? line) => DiagnosticLog.Dsh(line);
 }

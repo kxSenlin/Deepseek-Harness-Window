@@ -142,6 +142,7 @@ namespace DshGUI.Views
 
         private IntPtr _hwnd;
         private CoreWebView2? _wiredCore;
+        private Task<bool>? _webViewReadyTask;
         private PluginManagerService? _pluginManager;
         private PluginPackageService? _pluginPackage;
         private PluginManagerWindow? _pluginWindow;
@@ -319,36 +320,40 @@ namespace DshGUI.Views
             _ = _viewModel.StartAsync();
         }
 
-        // 初始化 / 重建 WebView2 控制器，并注入桥接脚本；可被重连流程复用。
-        private async Task<bool> EnsureWebViewReadyAsync()
+        // 初始化 / 重建 WebView2 控制器，并注入桥接脚本。
+        // 初始化只执行一次、后续复用结果：EnsureCoreWebView2Async 并发/重复调用会「永不返回」，用缓存的 Task 保证整段只执行一次。
+        private Task<bool> EnsureWebViewReadyAsync() => _webViewReadyTask ??= InitializeWebViewAsync();
+
+        private async Task<bool> InitializeWebViewAsync()
         {
             try
             {
                 WebView.DefaultBackgroundColor = _theme.WebViewBackgroundColor;
                 await WebView.EnsureCoreWebView2Async();
+
+                _theme.ApplyToWebView(WebView.CoreWebView2);
+                _viewModel.RefreshTheme();
+
+                var core = WebView.CoreWebView2;
+                if (core == null)
+                {
+                    LogWebView("EnsureCoreWebView2Async 完成但 CoreWebView2 为 null");
+                }
+                else if (!ReferenceEquals(core, _wiredCore))
+                {
+                    await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
+                    core.WebMessageReceived += OnWebMessageReceived;
+                    _wiredCore = core;
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
-                LogWebView($"EnsureCoreWebView2Async 失败: {ex.GetType().Name}: {ex.Message}");
+                LogWebView($"WebView2 初始化失败: {ex.GetType().Name}: {ex.Message}");
+                _webViewReadyTask = null;   // 失败不缓存，允许后续重试重新发起初始化。
                 return false;
             }
-
-            _theme.ApplyToWebView(WebView.CoreWebView2);
-            _viewModel.RefreshTheme();
-
-            var core = WebView.CoreWebView2;
-            if (core == null)
-            {
-                LogWebView("EnsureCoreWebView2Async 完成但 CoreWebView2 为 null");
-            }
-            else if (!ReferenceEquals(core, _wiredCore))
-            {
-                await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
-                core.WebMessageReceived += OnWebMessageReceived;
-                _wiredCore = core;
-            }
-
-            return true;
         }
 
         private async void OnNavigateRequested() => await NavigateAsync();
@@ -446,22 +451,8 @@ namespace DshGUI.Views
             }
         }
 
-        /// <summary>把 WebView2 关键节点写入 %LOCALAPPDATA%\DshGUI\webview.log，便于定位加载失败。</summary>
-        private void LogWebView(string message)
-        {
-            try
-            {
-                var path = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "DshGUI", "webview.log");
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.AppendAllText(path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
-            }
-            catch
-            {
-                // 日志写失败不影响运行。
-            }
-        }
+        /// <summary>把 WebView2 关键节点写入 app.log（[webview] 分类），便于定位加载失败。</summary>
+        private static void LogWebView(string message) => DiagnosticLog.App("webview", message);
 
         private void OnPageLoadTimeout()
         {
@@ -574,18 +565,7 @@ namespace DshGUI.Views
             }
             catch (Exception ex)
             {
-                var errorPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "DshGUI", "plugin-manager-error.log");
-                try
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(errorPath)!);
-                    File.WriteAllText(errorPath, DateTime.Now + Environment.NewLine + ex);
-                }
-                catch
-                {
-                    // 写诊断文件失败时忽略。
-                }
+                DiagnosticLog.App("plugin", "插件管理窗口打开失败：" + ex);
 
                 System.Windows.MessageBox.Show(this, "插件管理窗口打开失败：\n" + ex.Message, "DshGUI",
                     MessageBoxButton.OK, MessageBoxImage.Error);
